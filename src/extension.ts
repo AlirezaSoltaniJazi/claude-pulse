@@ -3,7 +3,8 @@ import { ConfigManager } from './config/configManager';
 import { readStats } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
 import { fetchCliSessionData, clearCliCache } from './data/cliRunner';
-import { getWeeklyUsage, getTodayActivity } from './data/dataAggregator';
+import { getTodayActivity } from './data/dataAggregator';
+import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
 import { DashboardPanel } from './ui/webviewPanel';
@@ -66,15 +67,20 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Register commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudePulse.showDashboard', () => {
+    vscode.commands.registerCommand('claudePulse.showDashboard', async () => {
       const config = configManager.getConfig();
+      // Show immediately with cached data, then refresh
       dashboardPanel.show(cachedData, config.sessionResetIntervalMinutes);
+      // Fetch fresh CLI data in background and update
+      clearCliCache();
+      await refreshCliData();
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claudePulse.refreshData', async () => {
       clearCliCache();
+      clearScanCache();
       await Promise.all([refreshData(false), refreshCliData()]);
       vscode.window.showInformationMessage('Claude Pulse: Data refreshed');
     })
@@ -128,7 +134,7 @@ async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
     sessions,
     activeSessions,
     mostRecentSession,
-    weeklyUsage: stats ? getWeeklyUsage(stats) : null,
+    weeklyUsage: await scanWeeklyUsage(config.claudeHomePath),
     todayActivity: stats ? getTodayActivity(stats) : null,
   };
 
