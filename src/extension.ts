@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ConfigManager } from './config/configManager';
 import { readStats } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
+import { fetchCliSessionData, clearCliCache } from './data/cliRunner';
 import { getWeeklyUsage, getTodayActivity } from './data/dataAggregator';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
@@ -24,6 +25,7 @@ let cachedData: ClaudePulseData = {
   mostRecentSession: null,
   weeklyUsage: null,
   todayActivity: null,
+  cliData: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -42,12 +44,13 @@ export function activate(context: vscode.ExtensionContext): void {
   sessionMonitor = new SessionMonitor();
   notificationManager = new NotificationManager(config, sessionMonitor);
 
-  // Initial data load
-  refreshData();
+  // Initial data load (file-based first, then CLI in background)
+  refreshData(false);
+  refreshCliData();
 
   // Wire file watcher events
-  fileWatcher.onStatsChanged(() => refreshData());
-  fileWatcher.onSessionsChanged(() => refreshData());
+  fileWatcher.onStatsChanged(() => refreshData(false));
+  fileWatcher.onSessionsChanged(() => refreshData(false));
 
   // Wire config changes
   configManager.onConfigChanged((newConfig) => {
@@ -70,8 +73,9 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('claudePulse.refreshData', () => {
-      refreshData();
+    vscode.commands.registerCommand('claudePulse.refreshData', async () => {
+      clearCliCache();
+      await Promise.all([refreshData(false), refreshCliData()]);
       vscode.window.showInformationMessage('Claude Pulse: Data refreshed');
     })
   );
@@ -107,7 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 }
 
-async function refreshData(): Promise<void> {
+async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
   const config = configManager.getConfig();
 
   const [stats, sessions] = await Promise.all([
@@ -119,6 +123,7 @@ async function refreshData(): Promise<void> {
   const mostRecentSession = getMostRecentSession(activeSessions.length > 0 ? activeSessions : sessions);
 
   cachedData = {
+    ...cachedData,
     stats,
     sessions,
     activeSessions,
@@ -137,15 +142,37 @@ async function refreshData(): Promise<void> {
   );
 
   updateUI();
+
+  if (alsoRefreshCli) {
+    await refreshCliData();
+  }
+}
+
+async function refreshCliData(): Promise<void> {
+  const config = configManager.getConfig();
+  const minInterval = config.pollingIntervalSeconds * 1000;
+
+  try {
+    const cliData = await fetchCliSessionData(minInterval);
+    cachedData = { ...cachedData, cliData };
+    updateUI();
+  } catch {
+    // CLI fetch failed silently - keep existing cached data
+  }
 }
 
 function updateUI(): void {
   const config = configManager.getConfig();
 
+  const activeSession = cachedData.activeSessions.length > 0
+    ? cachedData.activeSessions[0]
+    : cachedData.mostRecentSession;
+
   statusBar.update(
     config,
-    cachedData.activeSessions.length > 0 ? cachedData.activeSessions[0] : cachedData.mostRecentSession,
-    cachedData.todayActivity
+    activeSession,
+    cachedData.todayActivity,
+    cachedData.cliData?.rateLimitInfo ?? null
   );
 
   if (dashboardPanel.isVisible) {

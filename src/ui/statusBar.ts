@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
-import { DailyActivity, SessionFile } from '../types';
+import { DailyActivity, RateLimitInfo, SessionFile } from '../types';
 
 export class StatusBar implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
@@ -9,7 +9,7 @@ export class StatusBar implements vscode.Disposable {
   private currentSession: SessionFile | null = null;
   private todayActivity: DailyActivity | null = null;
   private config: ClaudePulseConfig | null = null;
-  private resetTimerAnchor: number | null = null;
+  private rateLimitInfo: RateLimitInfo | null = null;
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(
@@ -25,21 +25,17 @@ export class StatusBar implements vscode.Disposable {
   update(
     config: ClaudePulseConfig,
     activeSession: SessionFile | null,
-    todayActivity: DailyActivity | null
+    todayActivity: DailyActivity | null,
+    rateLimitInfo: RateLimitInfo | null
   ): void {
     this.config = config;
     this.currentSession = activeSession;
     this.todayActivity = todayActivity;
-
-    if (activeSession && !this.resetTimerAnchor) {
-      this.resetTimerAnchor = activeSession.startedAt;
-    }
-
+    this.rateLimitInfo = rateLimitInfo;
     this.render();
   }
 
   resetTimer(): void {
-    this.resetTimerAnchor = Date.now();
     this.render();
   }
 
@@ -53,23 +49,47 @@ export class StatusBar implements vscode.Disposable {
     const parts: string[] = ['$(pulse)'];
     const tooltipParts: string[] = [];
 
-    // Reset timer / session status
+    // Reset timer from real rate limit data
     if (this.config.statusBar.showResetTimer) {
-      if (this.currentSession && this.resetTimerAnchor) {
-        const resetMs = this.config.sessionResetIntervalMinutes * 60 * 1000;
-        const elapsed = Date.now() - this.resetTimerAnchor;
-        const remaining = resetMs - elapsed;
+      if (this.rateLimitInfo && this.rateLimitInfo.resetsAt > 0) {
+        const resetsAtMs = this.rateLimitInfo.resetsAt * 1000;
+        const remaining = resetsAtMs - Date.now();
 
         if (remaining > 0) {
           parts.push(this.formatDuration(remaining));
-          tooltipParts.push(`Reset in ${this.formatDuration(remaining)}`);
+          const resetTime = new Date(resetsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          tooltipParts.push(`Session resets at ${resetTime}`);
         } else {
           parts.push('Ready');
           tooltipParts.push('Session reset - Claude is ready');
         }
+
+        if (this.rateLimitInfo.status === 'allowed_warning') {
+          this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else if (this.rateLimitInfo.status === 'rejected') {
+          this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        } else {
+          this.statusBarItem.backgroundColor = undefined;
+        }
+      } else if (this.currentSession) {
+        // Fallback: estimate from config
+        const resetMs = this.config.sessionResetIntervalMinutes * 60 * 1000;
+        const elapsed = Date.now() - this.currentSession.startedAt;
+        const remaining = resetMs - elapsed;
+
+        if (remaining > 0) {
+          parts.push(`~${this.formatDuration(remaining)}`);
+          tooltipParts.push(`Est. reset in ${this.formatDuration(remaining)}`);
+        } else {
+          parts.push('Ready');
+          tooltipParts.push('Session likely reset');
+        }
+
+        this.statusBarItem.backgroundColor = undefined;
       } else {
         parts.push('No session');
         tooltipParts.push('No active Claude session');
+        this.statusBarItem.backgroundColor = undefined;
       }
     }
 
@@ -93,7 +113,7 @@ export class StatusBar implements vscode.Disposable {
   }
 
   private formatDuration(ms: number): string {
-    const totalSeconds = Math.floor(ms / 1000);
+    const totalSeconds = Math.floor(Math.abs(ms) / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;

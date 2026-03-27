@@ -60,6 +60,22 @@ export interface WeeklyUsageSummary {
   sonnetTokens: number;
 }
 
+export interface RateLimitInfo {
+  status: string;
+  resetsAt: number;
+  rateLimitType: string;
+  overageStatus: string;
+  overageResetsAt: number;
+  isUsingOverage: boolean;
+}
+
+export interface CliSessionData {
+  rateLimitInfo: RateLimitInfo | null;
+  totalCostUsd: number;
+  modelUsage: Record<string, ModelUsage>;
+  sessionId: string;
+}
+
 export interface ClaudePulseData {
   stats: StatsCache | null;
   sessions: SessionFile[];
@@ -67,4 +83,5 @@ export interface ClaudePulseData {
   mostRecentSession: SessionFile | null;
   weeklyUsage: WeeklyUsageSummary | null;
   todayActivity: DailyActivity | null;
+  cliData: CliSessionData | null;
 }

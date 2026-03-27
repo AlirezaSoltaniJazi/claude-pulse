@@ -1,4 +1,4 @@
-import { ClaudePulseData, ModelUsage, WeeklyUsageSummary } from '../types';
+import { ClaudePulseData, ModelUsage, RateLimitInfo, WeeklyUsageSummary } from '../types';
 
 export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
   return `<!DOCTYPE html>
@@ -156,11 +156,12 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
 <body>
   <div class="dashboard-header">
     <h1>Claude Pulse</h1>
-    <span class="subtitle">${data.stats ? `Data as of ${data.stats.lastComputedDate}` : 'No data available'}</span>
+    <span class="subtitle">${data.cliData?.rateLimitInfo ? 'Live data from Claude CLI' : data.stats ? `Stats cached from ${data.stats.lastComputedDate}` : 'No data available'}</span>
   </div>
 
   <div class="grid">
     ${renderSessionCard(data, resetIntervalMinutes)}
+    ${renderRateLimitCard(data.cliData?.rateLimitInfo ?? null)}
     ${renderWeeklyCard(data.weeklyUsage)}
     ${renderSonnetCard(data.weeklyUsage)}
     ${renderLifetimeCard(data)}
@@ -177,6 +178,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
 function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number): string {
   const session = data.mostRecentSession;
   const active = data.activeSessions.length > 0;
+  const rateLimit = data.cliData?.rateLimitInfo;
 
   if (!session) {
     return `<div class="card">
@@ -187,8 +189,23 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
 
   const startedAt = new Date(session.startedAt);
   const elapsed = Date.now() - session.startedAt;
-  const resetMs = resetIntervalMinutes * 60 * 1000;
-  const remaining = resetMs - elapsed;
+
+  // Use real reset time from API, fallback to estimate
+  let resetDisplay: string;
+  if (rateLimit && rateLimit.resetsAt > 0) {
+    const resetsAtMs = rateLimit.resetsAt * 1000;
+    const remaining = resetsAtMs - Date.now();
+    const resetTime = new Date(resetsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    resetDisplay = remaining > 0 ? `${formatDuration(remaining)} (at ${resetTime})` : 'Ready';
+  } else {
+    const resetMs = resetIntervalMinutes * 60 * 1000;
+    const remaining = resetMs - elapsed;
+    resetDisplay = remaining > 0 ? `~${formatDuration(remaining)} (estimated)` : 'Ready';
+  }
+
+  const costDisplay = data.cliData?.totalCostUsd
+    ? `$${data.cliData.totalCostUsd.toFixed(4)}`
+    : 'N/A';
 
   return `<div class="card">
     <h2>Current Session</h2>
@@ -217,8 +234,59 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
       <span class="stat-value">${formatDuration(elapsed)}</span>
     </div>
     <div class="stat-row">
-      <span class="stat-label">Est. Reset</span>
-      <span class="stat-value">${remaining > 0 ? formatDuration(remaining) : 'Ready'}</span>
+      <span class="stat-label">Resets</span>
+      <span class="stat-value">${resetDisplay}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Session Cost</span>
+      <span class="stat-value">${costDisplay}</span>
+    </div>
+  </div>`;
+}
+
+function renderRateLimitCard(rateLimit: RateLimitInfo | null): string {
+  if (!rateLimit) {
+    return `<div class="card">
+      <h2>Rate Limit</h2>
+      <p class="no-data">No rate limit data (run Refresh to fetch)</p>
+    </div>`;
+  }
+
+  const resetsAt = rateLimit.resetsAt > 0
+    ? new Date(rateLimit.resetsAt * 1000).toLocaleString()
+    : 'N/A';
+
+  const statusColor = rateLimit.status === 'allowed'
+    ? 'status-active'
+    : rateLimit.status === 'rejected'
+      ? 'status-inactive'
+      : '';
+
+  const overageResetsAt = rateLimit.overageResetsAt > 0
+    ? new Date(rateLimit.overageResetsAt * 1000).toLocaleDateString()
+    : 'N/A';
+
+  return `<div class="card">
+    <h2>Rate Limit</h2>
+    <div class="stat-row">
+      <span class="stat-label">Status</span>
+      <span class="stat-value ${statusColor}">${rateLimit.status}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Type</span>
+      <span class="stat-value">${rateLimit.rateLimitType}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Resets At</span>
+      <span class="stat-value">${resetsAt}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Overage</span>
+      <span class="stat-value">${rateLimit.isUsingOverage ? 'Yes' : 'No'}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Overage Resets</span>
+      <span class="stat-value">${overageResetsAt}</span>
     </div>
   </div>`;
 }
