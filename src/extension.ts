@@ -48,9 +48,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Initial data load (file-based first, then API in background)
   refreshData(false);
-  refreshUsageData();
+  refreshUsageData(true);
 
-  // Periodic usage API refresh
+  // Periodic usage API refresh (with feedback)
   startUsageRefreshInterval(config.usageRefreshIntervalSeconds);
 
   // Wire file watcher events — stats changes include usage data from cache file
@@ -132,7 +132,7 @@ function startUsageRefreshInterval(intervalSeconds: number): void {
     clearInterval(usageRefreshInterval);
   }
   const intervalMs = Math.max(intervalSeconds, 60) * 1000;
-  usageRefreshInterval = setInterval(() => refreshUsageData(), intervalMs);
+  usageRefreshInterval = setInterval(() => refreshUsageData(true), intervalMs);
 }
 
 async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
