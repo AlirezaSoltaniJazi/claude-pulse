@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './config/configManager';
-import { readStats } from './data/statsReader';
+import { readStats, readUsageFromCache } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
-import { fetchCliSessionData, clearCliCache } from './data/cliRunner';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
+import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
 import { DashboardPanel } from './ui/webviewPanel';
@@ -18,6 +18,7 @@ let statusBar: StatusBar;
 let dashboardPanel: DashboardPanel;
 let sessionMonitor: SessionMonitor;
 let notificationManager: NotificationManager;
+let usageRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
 let cachedData: ClaudePulseData = {
   stats: null,
@@ -26,7 +27,7 @@ let cachedData: ClaudePulseData = {
   mostRecentSession: null,
   weeklyUsage: null,
   todayActivity: null,
-  cliData: null,
+  usage: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -45,24 +46,33 @@ export function activate(context: vscode.ExtensionContext): void {
   sessionMonitor = new SessionMonitor();
   notificationManager = new NotificationManager(config, sessionMonitor);
 
-  // Initial data load (file-based first, then CLI in background)
+  // Initial data load (file-based first, then API in background)
   refreshData(false);
-  refreshCliData();
+  refreshUsageData();
 
-  // Wire file watcher events
+  // Periodic usage API refresh
+  startUsageRefreshInterval(config.usageRefreshIntervalSeconds);
+
+  // Wire file watcher events — stats changes include usage data from cache file
   fileWatcher.onStatsChanged(() => refreshData(false));
   fileWatcher.onSessionsChanged(() => refreshData(false));
 
   // Wire config changes
   configManager.onConfigChanged((newConfig) => {
     fileWatcher.updatePollingInterval(newConfig.pollingIntervalSeconds * 1000);
+    startUsageRefreshInterval(newConfig.usageRefreshIntervalSeconds);
     notificationManager.updateConfig(newConfig);
     updateUI();
   });
 
-  // Wire dashboard reset timer
+  // Wire dashboard events
   dashboardPanel.onResetTimer(() => {
     statusBar.resetTimer();
+  });
+  dashboardPanel.onRefreshData(async () => {
+    clearScanCache();
+    clearUsageCache();
+    await Promise.all([refreshData(false), refreshUsageData(true)]);
   });
 
   // Register commands
@@ -71,18 +81,17 @@ export function activate(context: vscode.ExtensionContext): void {
       const config = configManager.getConfig();
       // Show immediately with cached data, then refresh
       dashboardPanel.show(cachedData, config.sessionResetIntervalMinutes);
-      // Fetch fresh CLI data in background and update
-      clearCliCache();
-      await refreshCliData();
+      // Fetch fresh data in background and update
+      clearUsageCache();
+      await refreshUsageData();
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('claudePulse.refreshData', async () => {
-      clearCliCache();
       clearScanCache();
-      await Promise.all([refreshData(false), refreshCliData()]);
-      vscode.window.showInformationMessage('Claude Pulse: Data refreshed');
+      clearUsageCache();
+      await Promise.all([refreshData(false), refreshUsageData(true)]);
     })
   );
 
@@ -113,11 +122,20 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     dashboardPanel,
     sessionMonitor,
-    notificationManager
+    notificationManager,
+    { dispose: () => { if (usageRefreshInterval) clearInterval(usageRefreshInterval); } }
   );
 }
 
-async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
+function startUsageRefreshInterval(intervalSeconds: number): void {
+  if (usageRefreshInterval) {
+    clearInterval(usageRefreshInterval);
+  }
+  const intervalMs = Math.max(intervalSeconds, 60) * 1000;
+  usageRefreshInterval = setInterval(() => refreshUsageData(), intervalMs);
+}
+
+async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   const config = configManager.getConfig();
 
   const [stats, sessions] = await Promise.all([
@@ -128,6 +146,9 @@ async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
   const activeSessions = getActiveSessions(sessions);
   const mostRecentSession = getMostRecentSession(activeSessions.length > 0 ? activeSessions : sessions);
 
+  // Read usage from stats-cache file (written by Claude Code itself)
+  const fileUsage = await readUsageFromCache(config.claudeHomePath);
+
   cachedData = {
     ...cachedData,
     stats,
@@ -136,6 +157,7 @@ async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
     mostRecentSession,
     weeklyUsage: await scanWeeklyUsage(config.claudeHomePath),
     todayActivity: stats ? getTodayActivity(stats) : null,
+    usage: fileUsage ?? cachedData.usage,
   };
 
   // Update session monitor
@@ -149,21 +171,47 @@ async function refreshData(alsoRefreshCli: boolean = false): Promise<void> {
 
   updateUI();
 
-  if (alsoRefreshCli) {
-    await refreshCliData();
+  if (alsoRefreshUsage) {
+    await refreshUsageData();
   }
 }
 
-async function refreshCliData(): Promise<void> {
-  const config = configManager.getConfig();
-  const minInterval = config.pollingIntervalSeconds * 1000;
-
+async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsageResult | null> {
   try {
-    const cliData = await fetchCliSessionData(minInterval);
-    cachedData = { ...cachedData, cliData };
-    updateUI();
+    const result = await fetchUsage();
+    if (result.data) {
+      cachedData = { ...cachedData, usage: result.data };
+      updateUI();
+    }
+    if (showFeedback) {
+      showRefreshFeedback(result);
+    }
+    return result;
   } catch {
-    // CLI fetch failed silently - keep existing cached data
+    return null;
+  }
+}
+
+function showRefreshFeedback(result: FetchUsageResult): void {
+  switch (result.status) {
+    case 'success':
+      vscode.window.showInformationMessage('Claude Pulse: Data refreshed successfully');
+      break;
+    case 'rate_limited':
+      vscode.window.showWarningMessage('Claude Pulse: API rate limited — showing cached data. Will retry automatically.');
+      break;
+    case 'auth_error':
+      vscode.window.showErrorMessage('Claude Pulse: OAuth token expired or invalid. Try reopening your terminal.');
+      break;
+    case 'no_credentials':
+      vscode.window.showErrorMessage('Claude Pulse: No OAuth credentials found. Make sure Claude Code is logged in.');
+      break;
+    case 'error':
+      vscode.window.showWarningMessage(`Claude Pulse: ${result.message}`);
+      break;
+    case 'cached':
+      vscode.window.showInformationMessage('Claude Pulse: Data refreshed (from cache)');
+      break;
   }
 }
 
@@ -178,7 +226,7 @@ function updateUI(): void {
     config,
     activeSession,
     cachedData.todayActivity,
-    cachedData.cliData?.rateLimitInfo ?? null
+    cachedData.usage
   );
 
   if (dashboardPanel.isVisible) {

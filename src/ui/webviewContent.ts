@@ -1,4 +1,4 @@
-import { ClaudePulseData, ModelUsage, RateLimitInfo, WeeklyUsageSummary } from '../types';
+import { ClaudePulseData, ClaudeUsage, ModelUsage, WeeklyUsageSummary } from '../types';
 
 export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
   return `<!DOCTYPE html>
@@ -17,6 +17,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       --muted: var(--vscode-descriptionForeground, #888);
       --success: var(--vscode-testing-iconPassed, #4caf50);
       --warning: var(--vscode-editorWarning-foreground, #ff9800);
+      --error: var(--vscode-editorError-foreground, #f44336);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -90,6 +91,35 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       margin: 4px 0 8px;
     }
 
+    .usage-bar {
+      margin: 8px 0;
+    }
+
+    .usage-bar-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .usage-bar-track {
+      background: var(--border);
+      border-radius: 4px;
+      height: 8px;
+      overflow: hidden;
+    }
+
+    .usage-bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s;
+    }
+
+    .usage-bar-info {
+      color: var(--muted);
+      font-size: 0.85em;
+      margin-top: 4px;
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -151,17 +181,42 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       font-style: italic;
       padding: 12px 0;
     }
+
+    .refresh-btn {
+      margin-left: auto;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85em;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .refresh-btn:hover {
+      background: var(--border);
+    }
   </style>
 </head>
 <body>
   <div class="dashboard-header">
     <h1>Claude Pulse</h1>
-    <span class="subtitle">${data.cliData?.rateLimitInfo ? 'Live data from Claude CLI' : data.stats ? `Stats cached from ${data.stats.lastComputedDate}` : 'No data available'}</span>
+    <span class="subtitle">${data.usage ? 'Live data from Anthropic API' : data.stats ? `Stats cached from ${data.stats.lastComputedDate}` : 'No data available'}</span>
+    <button class="refresh-btn" onclick="refreshData()">Refresh</button>
   </div>
 
+  <script>
+    const vscode = acquireVsCodeApi();
+    function refreshData() {
+      vscode.postMessage({ command: 'refreshData' });
+    }
+  </script>
+
   <div class="grid">
+    ${renderUsageCard(data.usage)}
     ${renderSessionCard(data, resetIntervalMinutes)}
-    ${renderRateLimitCard(data.cliData?.rateLimitInfo ?? null)}
     ${renderWeeklyCard(data.weeklyUsage)}
     ${renderSonnetCard(data.weeklyUsage)}
     ${renderLifetimeCard(data)}
@@ -175,10 +230,62 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
 </html>`;
 }
 
+function renderUsageCard(usage: ClaudeUsage | null): string {
+  if (!usage) {
+    return `<div class="card">
+      <h2>Usage</h2>
+      <p class="no-data">No usage data (click Refresh to fetch)</p>
+    </div>`;
+  }
+
+  const windows = [
+    { label: 'Current Session (5h)', data: usage.five_hour },
+    { label: 'This Week (All Models)', data: usage.seven_day },
+    { label: 'This Week (Sonnet)', data: usage.seven_day_sonnet },
+    { label: 'This Week (Opus)', data: usage.seven_day_opus },
+  ];
+
+  const bars = windows
+    .filter(w => w.data !== null)
+    .map(w => {
+      const pct = Math.round(w.data!.utilization);
+      const color = pct >= 90 ? 'var(--error)' : pct >= 75 ? 'var(--warning)' : 'var(--accent)';
+      const resetStr = w.data!.resets_at ? formatResetTime(w.data!.resets_at) : '';
+      return `<div class="usage-bar">
+        <div class="usage-bar-header">
+          <span class="stat-label">${w.label}</span>
+          <span class="stat-value">${pct}%</span>
+        </div>
+        <div class="usage-bar-track">
+          <div class="usage-bar-fill" style="background: ${color}; width: ${pct}%;"></div>
+        </div>
+        ${resetStr ? `<div class="usage-bar-info">Resets ${resetStr}</div>` : ''}
+      </div>`;
+    })
+    .join('');
+
+  const extraUsage = usage.extra_usage
+    ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+        <div class="usage-bar-header">
+          <span class="stat-label">Extra Usage</span>
+          <span class="stat-value">$${usage.extra_usage.used_credits.toFixed(2)} / $${usage.extra_usage.monthly_limit.toFixed(2)}</span>
+        </div>
+        <div class="usage-bar-track">
+          <div class="usage-bar-fill" style="background: ${usage.extra_usage.utilization >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, usage.extra_usage.utilization)}%;"></div>
+        </div>
+      </div>`
+    : '';
+
+  return `<div class="card">
+    <h2>Usage</h2>
+    ${bars}
+    ${extraUsage}
+  </div>`;
+}
+
 function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number): string {
   const session = data.mostRecentSession;
   const active = data.activeSessions.length > 0;
-  const rateLimit = data.cliData?.rateLimitInfo;
 
   if (!session) {
     return `<div class="card">
@@ -190,10 +297,9 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
   const startedAt = new Date(session.startedAt);
   const elapsed = Date.now() - session.startedAt;
 
-  // Use real reset time from API, fallback to estimate
   let resetDisplay: string;
-  if (rateLimit && rateLimit.resetsAt > 0) {
-    const resetsAtMs = rateLimit.resetsAt * 1000;
+  if (data.usage?.five_hour?.resets_at) {
+    const resetsAtMs = new Date(data.usage.five_hour.resets_at).getTime();
     const remaining = resetsAtMs - Date.now();
     const resetTime = new Date(resetsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     resetDisplay = remaining > 0 ? `${formatDuration(remaining)} (at ${resetTime})` : 'Ready';
@@ -203,9 +309,7 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
     resetDisplay = remaining > 0 ? `~${formatDuration(remaining)} (estimated)` : 'Ready';
   }
 
-  const costDisplay = data.cliData?.totalCostUsd
-    ? `$${data.cliData.totalCostUsd.toFixed(4)}`
-    : 'N/A';
+  const costDisplay = 'N/A';
 
   return `<div class="card">
     <h2>Current Session</h2>
@@ -240,53 +344,6 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
     <div class="stat-row">
       <span class="stat-label">Session Cost</span>
       <span class="stat-value">${costDisplay}</span>
-    </div>
-  </div>`;
-}
-
-function renderRateLimitCard(rateLimit: RateLimitInfo | null): string {
-  if (!rateLimit) {
-    return `<div class="card">
-      <h2>Rate Limit</h2>
-      <p class="no-data">No rate limit data (run Refresh to fetch)</p>
-    </div>`;
-  }
-
-  const resetsAt = rateLimit.resetsAt > 0
-    ? new Date(rateLimit.resetsAt * 1000).toLocaleString()
-    : 'N/A';
-
-  const statusColor = rateLimit.status === 'allowed'
-    ? 'status-active'
-    : rateLimit.status === 'rejected'
-      ? 'status-inactive'
-      : '';
-
-  const overageResetsAt = rateLimit.overageResetsAt > 0
-    ? new Date(rateLimit.overageResetsAt * 1000).toLocaleDateString()
-    : 'N/A';
-
-  return `<div class="card">
-    <h2>Rate Limit</h2>
-    <div class="stat-row">
-      <span class="stat-label">Status</span>
-      <span class="stat-value ${statusColor}">${rateLimit.status}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Type</span>
-      <span class="stat-value">${rateLimit.rateLimitType}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Resets At</span>
-      <span class="stat-value">${resetsAt}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Overage</span>
-      <span class="stat-value">${rateLimit.isUsingOverage ? 'Yes' : 'No'}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Overage Resets</span>
-      <span class="stat-value">${overageResetsAt}</span>
     </div>
   </div>`;
 }
@@ -441,6 +498,16 @@ function renderHourlyCard(data: ClaudePulseData): string {
     <h2>Activity by Hour</h2>
     ${bars}
   </div>`;
+}
+
+function formatResetTime(isoString: string): string {
+  const resetDate = new Date(isoString);
+  const remaining = resetDate.getTime() - Date.now();
+
+  if (remaining <= 0) return 'soon';
+
+  const time = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `in ${formatDuration(remaining)} (at ${time})`;
 }
 
 function formatDuration(ms: number): string {

@@ -61,11 +61,22 @@
           "default": 300,
           "description": "Session reset interval in minutes (e.g., 300 = 5 hours for Pro plan)"
         },
+        "claudePulse.sessionTokenLimit": {
+          "type": "number",
+          "default": 8000000,
+          "description": "Estimated token limit per 5h session window (used for usage % calculation). Calibrate by comparing with /usage in Claude CLI. Default 8M works for Max plan."
+        },
         "claudePulse.pollingIntervalSeconds": {
           "type": "number",
           "default": 30,
           "minimum": 5,
           "description": "How often to refresh data from Claude files (seconds)"
+        },
+        "claudePulse.usageRefreshIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 60,
+          "description": "How often to refresh usage data from the Anthropic API (seconds). Minimum 60s to avoid rate limiting."
         },
         "claudePulse.notifications.enabled": {
           "type": "boolean",

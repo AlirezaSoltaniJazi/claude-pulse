@@ -9,7 +9,9 @@ export interface ClaudePulseConfig {
     showSessionCount: boolean;
   };
   sessionResetIntervalMinutes: number;
+  sessionTokenLimit: number;
   pollingIntervalSeconds: number;
+  usageRefreshIntervalSeconds: number;
   notifications: {
     enabled: boolean;
     useSystemNotifications: boolean;
@@ -47,7 +49,9 @@ export class ConfigManager implements vscode.Disposable {
         showSessionCount: cfg.get<boolean>('statusBar.showSessionCount', false),
       },
       sessionResetIntervalMinutes: cfg.get<number>('sessionResetIntervalMinutes', 300),
+      sessionTokenLimit: cfg.get<number>('sessionTokenLimit', 8_000_000),
       pollingIntervalSeconds: cfg.get<number>('pollingIntervalSeconds', 30),
+      usageRefreshIntervalSeconds: Math.max(cfg.get<number>('usageRefreshIntervalSeconds', 60), 60),
       notifications: {
         enabled: cfg.get<boolean>('notifications.enabled', false),
         useSystemNotifications: cfg.get<boolean>('notifications.useSystemNotifications', false),
