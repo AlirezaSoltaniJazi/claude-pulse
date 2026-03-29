@@ -74,9 +74,9 @@
         },
         "claudePulse.usageRefreshIntervalSeconds": {
           "type": "number",
-          "default": 60,
+          "default": 3600,
           "minimum": 60,
-          "description": "How often to refresh usage data from the Anthropic API (seconds). Minimum 60s to avoid rate limiting."
+          "description": "How often to refresh usage data from the Anthropic API (seconds). Default is 3600 (1 hour). Minimum 60s."
         },
         "claudePulse.notifications.enabled": {
           "type": "boolean",
