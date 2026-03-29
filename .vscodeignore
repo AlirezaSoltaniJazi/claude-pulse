@@ -27,3 +27,5 @@ package-lock.json
 .idea/**
 .opencode/**
 PUBLISHING.md
+INJECT.md
+agents.md
