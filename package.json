@@ -2,7 +2,7 @@
   "name": "claude-pulse",
   "displayName": "Claude Pulse",
   "description": "Monitor Claude Code usage, sessions, and token consumption from your VS Code status bar.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "AlirezaSoltaniJazi",
   "license": "MIT",
   "repository": {
@@ -123,8 +123,14 @@
     "prepare": "husky"
   },
   "lint-staged": {
-    "src/**/*.ts": ["eslint --fix", "prettier --write"],
-    "test/**/*.ts": ["eslint --fix", "prettier --write"]
+    "src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "test/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
   },
   "dependencies": {
     "node-notifier": "^10.0.1"
