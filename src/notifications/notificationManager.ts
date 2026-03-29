@@ -75,15 +75,18 @@ export class NotificationManager implements vscode.Disposable {
   private sendSystemNotification(title: string, body: string): void {
     try {
       // Dynamic import to avoid requiring node-notifier when not needed
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
       const notifier = require('node-notifier');
       notifier.notify({
         title: `Claude Pulse: ${title}`,
         message: body,
         sound: true,
       });
-    } catch {
-      // node-notifier not available, fall back silently
+    } catch (e) {
+      // node-notifier not available or failed
+      console.warn(
+        `Claude Pulse: System notification failed: ${e instanceof Error ? e.message : String(e)}`
+      );
     }
   }
 

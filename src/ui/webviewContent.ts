@@ -1,4 +1,6 @@
 import { ClaudePulseData, ClaudeUsage, ModelUsage, WeeklyUsageSummary } from '../types';
+import { formatDurationShort, formatNumber } from '../utils/formatting';
+import { USAGE_WARNING_THRESHOLD, USAGE_CRITICAL_THRESHOLD } from '../constants';
 
 export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
   return `<!DOCTYPE html>
@@ -246,10 +248,15 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
   ];
 
   const bars = windows
-    .filter(w => w.data !== null)
-    .map(w => {
+    .filter((w) => w.data !== null)
+    .map((w) => {
       const pct = Math.round(w.data!.utilization);
-      const color = pct >= 90 ? 'var(--error)' : pct >= 75 ? 'var(--warning)' : 'var(--accent)';
+      const color =
+        pct >= USAGE_CRITICAL_THRESHOLD
+          ? 'var(--error)'
+          : pct >= USAGE_WARNING_THRESHOLD
+            ? 'var(--warning)'
+            : 'var(--accent)';
       const resetStr = w.data!.resets_at ? formatResetTime(w.data!.resets_at) : '';
       return `<div class="usage-bar">
         <div class="usage-bar-header">
@@ -301,12 +308,15 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
   if (data.usage?.five_hour?.resets_at) {
     const resetsAtMs = new Date(data.usage.five_hour.resets_at).getTime();
     const remaining = resetsAtMs - Date.now();
-    const resetTime = new Date(resetsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    resetDisplay = remaining > 0 ? `${formatDuration(remaining)} (at ${resetTime})` : 'Ready';
+    const resetTime = new Date(resetsAtMs).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    resetDisplay = remaining > 0 ? `${formatDurationShort(remaining)} (at ${resetTime})` : 'Ready';
   } else {
     const resetMs = resetIntervalMinutes * 60 * 1000;
     const remaining = resetMs - elapsed;
-    resetDisplay = remaining > 0 ? `~${formatDuration(remaining)} (estimated)` : 'Ready';
+    resetDisplay = remaining > 0 ? `~${formatDurationShort(remaining)} (estimated)` : 'Ready';
   }
 
   const costDisplay = 'N/A';
@@ -335,7 +345,7 @@ function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number):
     </div>
     <div class="stat-row">
       <span class="stat-label">Duration</span>
-      <span class="stat-value">${formatDuration(elapsed)}</span>
+      <span class="stat-value">${formatDurationShort(elapsed)}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Resets</span>
@@ -386,9 +396,8 @@ function renderSonnetCard(weekly: WeeklyUsageSummary | null): string {
     </div>`;
   }
 
-  const percentage = weekly.totalTokens > 0
-    ? ((weekly.sonnetTokens / weekly.totalTokens) * 100).toFixed(1)
-    : '0';
+  const percentage =
+    weekly.totalTokens > 0 ? ((weekly.sonnetTokens / weekly.totalTokens) * 100).toFixed(1) : '0';
 
   return `<div class="card">
     <h2>This Week (Sonnet Only)</h2>
@@ -427,7 +436,7 @@ function renderLifetimeCard(data: ClaudePulseData): string {
     </div>
     <div class="stat-row">
       <span class="stat-label">Longest Session</span>
-      <span class="stat-value">${formatDuration(s.longestSession.duration)} (${formatNumber(s.longestSession.messageCount)} msgs)</span>
+      <span class="stat-value">${formatDurationShort(s.longestSession.duration)} (${formatNumber(s.longestSession.messageCount)} msgs)</span>
     </div>
   </div>`;
 }
@@ -507,23 +516,5 @@ function formatResetTime(isoString: string): string {
   if (remaining <= 0) return 'soon';
 
   const time = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return `in ${formatDuration(remaining)} (at ${time})`;
-}
-
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.floor(Math.abs(ms) / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  return `${minutes}m`;
-}
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toString();
+  return `in ${formatDurationShort(remaining)} (at ${time})`;
 }

@@ -123,7 +123,11 @@ export function activate(context: vscode.ExtensionContext): void {
     dashboardPanel,
     sessionMonitor,
     notificationManager,
-    { dispose: () => { if (usageRefreshInterval) clearInterval(usageRefreshInterval); } }
+    {
+      dispose: () => {
+        if (usageRefreshInterval) clearInterval(usageRefreshInterval);
+      },
+    }
   );
 }
 
@@ -144,7 +148,9 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   ]);
 
   const activeSessions = getActiveSessions(sessions);
-  const mostRecentSession = getMostRecentSession(activeSessions.length > 0 ? activeSessions : sessions);
+  const mostRecentSession = getMostRecentSession(
+    activeSessions.length > 0 ? activeSessions : sessions
+  );
 
   // Read usage from stats-cache file (written by Claude Code itself)
   const fileUsage = await readUsageFromCache(config.claudeHomePath);
@@ -164,10 +170,7 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   sessionMonitor.updateSessions(sessions);
 
   // Check reset timer for notifications
-  notificationManager.checkResetTimer(
-    mostRecentSession,
-    mostRecentSession?.startedAt ?? null
-  );
+  notificationManager.checkResetTimer(mostRecentSession, mostRecentSession?.startedAt ?? null);
 
   updateUI();
 
@@ -187,7 +190,10 @@ async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsa
       showRefreshFeedback(result);
     }
     return result;
-  } catch {
+  } catch (e) {
+    console.warn(
+      `Claude Pulse: Usage refresh failed: ${e instanceof Error ? e.message : String(e)}`
+    );
     return null;
   }
 }
@@ -198,13 +204,19 @@ function showRefreshFeedback(result: FetchUsageResult): void {
       vscode.window.showInformationMessage('Claude Pulse: Data refreshed successfully');
       break;
     case 'rate_limited':
-      vscode.window.showWarningMessage('Claude Pulse: API rate limited — showing cached data. Will retry automatically.');
+      vscode.window.showWarningMessage(
+        'Claude Pulse: API rate limited — showing cached data. Will retry automatically.'
+      );
       break;
     case 'auth_error':
-      vscode.window.showErrorMessage('Claude Pulse: OAuth token expired or invalid. Try reopening your terminal.');
+      vscode.window.showErrorMessage(
+        'Claude Pulse: OAuth token expired or invalid. Try reopening your terminal.'
+      );
       break;
     case 'no_credentials':
-      vscode.window.showErrorMessage('Claude Pulse: No OAuth credentials found. Make sure Claude Code is logged in.');
+      vscode.window.showErrorMessage(
+        'Claude Pulse: No OAuth credentials found. Make sure Claude Code is logged in.'
+      );
       break;
     case 'error':
       vscode.window.showWarningMessage(`Claude Pulse: ${result.message}`);
@@ -218,16 +230,12 @@ function showRefreshFeedback(result: FetchUsageResult): void {
 function updateUI(): void {
   const config = configManager.getConfig();
 
-  const activeSession = cachedData.activeSessions.length > 0
-    ? cachedData.activeSessions[0]
-    : cachedData.mostRecentSession;
+  const activeSession =
+    cachedData.activeSessions.length > 0
+      ? cachedData.activeSessions[0]
+      : cachedData.mostRecentSession;
 
-  statusBar.update(
-    config,
-    activeSession,
-    cachedData.todayActivity,
-    cachedData.usage
-  );
+  statusBar.update(config, activeSession, cachedData.todayActivity, cachedData.usage);
 
   if (dashboardPanel.isVisible) {
     dashboardPanel.update(cachedData, config.sessionResetIntervalMinutes);

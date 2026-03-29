@@ -1,15 +1,12 @@
 import { StatsCache, WeeklyUsageSummary, DailyActivity } from '../types';
+import { getCurrentWeekBounds } from '../utils/dateUtils';
 
 export function getWeeklyUsage(stats: StatsCache): WeeklyUsageSummary {
   const { weekStart, weekEnd } = getCurrentWeekBounds();
 
-  const weekActivity = stats.dailyActivity.filter(
-    (d) => d.date >= weekStart && d.date <= weekEnd
-  );
+  const weekActivity = stats.dailyActivity.filter((d) => d.date >= weekStart && d.date <= weekEnd);
 
-  const weekTokens = stats.dailyModelTokens.filter(
-    (d) => d.date >= weekStart && d.date <= weekEnd
-  );
+  const weekTokens = stats.dailyModelTokens.filter((d) => d.date >= weekStart && d.date <= weekEnd);
 
   const tokensByModel: Record<string, number> = {};
   let totalTokens = 0;
@@ -58,8 +55,26 @@ export function getTodayActivity(stats: StatsCache): DailyActivity | null {
   return stats.dailyActivity.find((d) => d.date === today) ?? null;
 }
 
-export function getModelBreakdown(stats: StatsCache): Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; total: number }> {
-  const result: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; total: number }> = {};
+export function getModelBreakdown(stats: StatsCache): Record<
+  string,
+  {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    total: number;
+  }
+> {
+  const result: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadInputTokens: number;
+      cacheCreationInputTokens: number;
+      total: number;
+    }
+  > = {};
 
   for (const [model, usage] of Object.entries(stats.modelUsage)) {
     result[model] = {
@@ -67,32 +82,13 @@ export function getModelBreakdown(stats: StatsCache): Record<string, { inputToke
       outputTokens: usage.outputTokens,
       cacheReadInputTokens: usage.cacheReadInputTokens,
       cacheCreationInputTokens: usage.cacheCreationInputTokens,
-      total: usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens + usage.cacheCreationInputTokens,
+      total:
+        usage.inputTokens +
+        usage.outputTokens +
+        usage.cacheReadInputTokens +
+        usage.cacheCreationInputTokens,
     };
   }
 
   return result;
-}
-
-function getCurrentWeekBounds(): { weekStart: string; weekEnd: string } {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  // Monday = 0, Sunday = 6
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + mondayOffset);
-  monday.setHours(0, 0, 0, 0);
-
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  return {
-    weekStart: formatDate(monday),
-    weekEnd: formatDate(sunday),
-  };
-}
-
-function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
 }

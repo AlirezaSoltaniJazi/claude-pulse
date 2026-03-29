@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { WeeklyUsageSummary } from '../types';
+import { getCurrentWeekBounds } from '../utils/dateUtils';
+import { SCAN_CACHE_TTL_MS } from '../constants';
 
 interface ScanCache {
   data: WeeklyUsageSummary;
@@ -8,7 +10,6 @@ interface ScanCache {
 }
 
 let scanCache: ScanCache | null = null;
-const CACHE_TTL_MS = 60_000; // 1 minute
 
 /**
  * Scans JSONL session files to compute accurate weekly usage stats.
@@ -18,7 +19,7 @@ export async function scanWeeklyUsage(
   claudeHomePath: string,
   forceRefresh: boolean = false
 ): Promise<WeeklyUsageSummary | null> {
-  if (!forceRefresh && scanCache && Date.now() - scanCache.timestamp < CACHE_TTL_MS) {
+  if (!forceRefresh && scanCache && Date.now() - scanCache.timestamp < SCAN_CACHE_TTL_MS) {
     return scanCache.data;
   }
 
@@ -49,11 +50,11 @@ export async function scanWeeklyUsage(
       let files: fs.Dirent[];
       try {
         files = await fs.promises.readdir(dirPath, { withFileTypes: true });
-      } catch {
+      } catch (_e) {
         continue;
       }
 
-      const jsonlFiles = files.filter(f => f.name.endsWith('.jsonl'));
+      const jsonlFiles = files.filter((f) => f.name.endsWith('.jsonl'));
 
       for (const file of jsonlFiles) {
         const filePath = path.join(dirPath, file.name);
@@ -62,7 +63,7 @@ export async function scanWeeklyUsage(
         try {
           const stat = await fs.promises.stat(filePath);
           if (stat.mtimeMs < weekStartMs) continue;
-        } catch {
+        } catch (_e) {
           continue;
         }
 
@@ -82,7 +83,7 @@ export async function scanWeeklyUsage(
               }
             }
           }
-        } catch {
+        } catch (_e) {
           // Skip problematic files
         }
       }
@@ -101,7 +102,7 @@ export async function scanWeeklyUsage(
 
     scanCache = { data, timestamp: Date.now() };
     return data;
-  } catch {
+  } catch (_e) {
     return scanCache?.data ?? null;
   }
 }
@@ -116,10 +117,7 @@ interface FileScanResult {
   tokensByModel: Record<string, number>;
 }
 
-async function scanSingleFile(
-  filePath: string,
-  weekStartDate: Date
-): Promise<FileScanResult> {
+async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<FileScanResult> {
   const content = await fs.promises.readFile(filePath, 'utf-8');
   const lines = content.split('\n');
 
@@ -167,37 +165,10 @@ async function scanSingleFile(
       if (event.type === 'user') {
         messageCount++;
       }
-    } catch {
-      // Skip malformed lines
+    } catch (_e) {
+      // Skip malformed JSONL lines
     }
   }
 
   return { messageCount, toolCallCount, tokensByModel };
-}
-
-function getCurrentWeekBounds(): {
-  weekStart: string;
-  weekEnd: string;
-  weekStartDate: Date;
-} {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + mondayOffset);
-  monday.setHours(0, 0, 0, 0);
-
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  return {
-    weekStart: formatDate(monday),
-    weekEnd: formatDate(sunday),
-    weekStartDate: monday,
-  };
-}
-
-function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
 }

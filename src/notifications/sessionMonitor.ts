@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SessionFile } from '../types';
 import { isProcessAlive } from '../data/sessionReader';
+import { LIVENESS_CHECK_INTERVAL_MS } from '../constants';
 
 export class SessionMonitor implements vscode.Disposable {
   private readonly _onSessionStarted = new vscode.EventEmitter<SessionFile>();
@@ -14,7 +15,7 @@ export class SessionMonitor implements vscode.Disposable {
 
   constructor() {
     // Periodically check if known PIDs are still alive
-    this.livenessInterval = setInterval(() => this.checkLiveness(), 10000);
+    this.livenessInterval = setInterval(() => this.checkLiveness(), LIVENESS_CHECK_INTERVAL_MS);
   }
 
   updateSessions(sessions: SessionFile[]): void {

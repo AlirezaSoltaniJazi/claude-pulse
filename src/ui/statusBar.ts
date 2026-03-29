@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
 import { ClaudeUsage, DailyActivity, SessionFile } from '../types';
+import { formatDuration, formatNumber } from '../utils/formatting';
+import {
+  USAGE_WARNING_THRESHOLD,
+  USAGE_CRITICAL_THRESHOLD,
+  STATUS_BAR_TICK_MS,
+} from '../constants';
 
 export class StatusBar implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
@@ -12,14 +18,11 @@ export class StatusBar implements vscode.Disposable {
   private usage: ClaudeUsage | null = null;
 
   constructor() {
-    this.statusBarItem = vscode.window.createStatusBarItem(
-      vscode.StatusBarAlignment.Left,
-      100
-    );
+    this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     this.statusBarItem.command = 'claudePulse.showDashboard';
     this.statusBarItem.show();
 
-    this.tickInterval = setInterval(() => this.render(), 1000);
+    this.tickInterval = setInterval(() => this.render(), STATUS_BAR_TICK_MS);
   }
 
   update(
@@ -59,8 +62,10 @@ export class StatusBar implements vscode.Disposable {
       ].filter((w): w is { label: string; data: NonNullable<typeof w.data> } => w.data !== null);
 
       if (windows.length > 0) {
-        const maxWindow = windows.reduce((max, w) =>
-          w.data.utilization > max.data.utilization ? w : max, windows[0]);
+        const maxWindow = windows.reduce(
+          (max, w) => (w.data.utilization > max.data.utilization ? w : max),
+          windows[0]
+        );
         const pct = Math.round(maxWindow.data.utilization);
         parts.push(`${pct}%`);
 
@@ -70,10 +75,14 @@ export class StatusBar implements vscode.Disposable {
         }
 
         // Color based on max utilization
-        if (pct >= 90) {
-          this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-        } else if (pct >= 75) {
-          this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        if (pct >= USAGE_CRITICAL_THRESHOLD) {
+          this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+            'statusBarItem.errorBackground'
+          );
+        } else if (pct >= USAGE_WARNING_THRESHOLD) {
+          this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+            'statusBarItem.warningBackground'
+          );
         } else {
           this.statusBarItem.backgroundColor = undefined;
         }
@@ -84,8 +93,11 @@ export class StatusBar implements vscode.Disposable {
           const remaining = resetsAtMs - Date.now();
 
           if (remaining > 0) {
-            parts.push(this.formatDuration(remaining));
-            const resetTime = new Date(resetsAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            parts.push(formatDuration(remaining));
+            const resetTime = new Date(resetsAtMs).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
             tooltipParts.push(`Resets at ${resetTime}`);
           } else {
             parts.push('Ready');
@@ -106,7 +118,7 @@ export class StatusBar implements vscode.Disposable {
           const remaining = resetMs - elapsed;
 
           if (remaining > 0) {
-            parts.push(`~${this.formatDuration(remaining)}`);
+            parts.push(`~${formatDuration(remaining)}`);
           } else {
             parts.push('Ready');
           }
@@ -120,8 +132,8 @@ export class StatusBar implements vscode.Disposable {
     // Token count
     if (this.config.statusBar.showTokenCount && this.todayActivity) {
       const tokens = this.todayActivity.messageCount;
-      parts.push(`${this.formatNumber(tokens)} msgs`);
-      tooltipParts.push(`Today: ${this.formatNumber(tokens)} messages`);
+      parts.push(`${formatNumber(tokens)} msgs`);
+      tooltipParts.push(`Today: ${formatNumber(tokens)} messages`);
     }
 
     // Session count
@@ -131,27 +143,8 @@ export class StatusBar implements vscode.Disposable {
     }
 
     this.statusBarItem.text = parts.join(' ');
-    this.statusBarItem.tooltip = tooltipParts.length > 0
-      ? tooltipParts.join(' | ')
-      : 'Click to open Claude Pulse dashboard';
-  }
-
-  private formatDuration(ms: number): string {
-    const totalSeconds = Math.floor(Math.abs(ms) / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
-    }
-    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
-  }
-
-  private formatNumber(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return n.toString();
+    this.statusBarItem.tooltip =
+      tooltipParts.length > 0 ? tooltipParts.join(' | ') : 'Click to open Claude Pulse dashboard';
   }
 
   dispose(): void {

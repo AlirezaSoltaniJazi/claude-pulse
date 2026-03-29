@@ -38,8 +38,8 @@ export class FileWatcher implements vscode.Disposable {
       this.sessionWatcher = fs.watch(sessionsDir, (_eventType, _filename) => {
         this._onSessionsChanged.fire();
       });
-    } catch {
-      // Sessions directory might not exist yet
+    } catch (_e) {
+      // Sessions directory might not exist yet — will retry on next poll
     }
   }
 
