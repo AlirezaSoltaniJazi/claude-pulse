@@ -5,7 +5,7 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.5] - 2026-03-29
+## [0.1.6] - 2026-03-29
 
 ### Added
 
@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- API data no longer overwritten by stale local file data on file watcher refresh
+## [0.1.5] - 2026-03-29
+
+### Changed
+
+- Update package.json
 
 ## [0.1.4] - 2026-03-29
 
@@ -47,7 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prettier code formatting with `.prettierrc` config
 - Enhanced ESLint rules (`eqeqeq`, `no-throw-literal`, Prettier integration)
 - Husky pre-commit hooks with lint-staged for automatic linting and formatting
-- Vitest test suite with 66 unit tests covering dataAggregator, statsReader, sessionReader, configManager, and formatting utilities
+- Vitest test suite with 66 unit tests covering dataAggregator, statsReader, sessionReader, configManager, and
+  formatting utilities
 - VS Code mock for testing (`test/__mocks__/vscode.ts`)
 - CI workflow (`.github/workflows/ci.yml`) — lint, format check, build, and test on PRs (Node 18 & 20)
 - Release workflow (`.github/workflows/release.yml`) — automated Marketplace publishing on version tags
@@ -60,7 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deduplicated `formatDuration`, `formatNumber` into shared `src/utils/formatting.ts`
 - Deduplicated `getCurrentWeekBounds`, `formatDate` into shared `src/utils/dateUtils.ts`
 - Updated all source files to import from shared utilities and constants
-- Added logging to previously empty catch blocks in usageApi, fileWatcher, notificationManager, and extension entry point
+- Added logging to previously empty catch blocks in usageApi, fileWatcher, notificationManager, and extension entry
+  point
 - Formatted all source files with Prettier
 
 ## [0.1.0] - 2025-03-28
