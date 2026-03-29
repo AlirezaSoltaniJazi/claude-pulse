@@ -19,6 +19,7 @@ let dashboardPanel: DashboardPanel;
 let sessionMonitor: SessionMonitor;
 let notificationManager: NotificationManager;
 let usageRefreshInterval: ReturnType<typeof setInterval> | null = null;
+let hasApiUsageData = false;
 
 let cachedData: ClaudePulseData = {
   stats: null,
@@ -156,8 +157,13 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     activeSessions.length > 0 ? activeSessions : sessions
   );
 
-  // Read usage from stats-cache file (written by Claude Code itself)
-  const fileUsage = await readUsageFromCache(config.claudeHomePath);
+  // Read usage from stats-cache file — only use as fallback when no API data exists.
+  // API data is more accurate and should not be overwritten by stale file data.
+  let usage = cachedData.usage;
+  if (!hasApiUsageData) {
+    const fileUsage = await readUsageFromCache(config.claudeHomePath);
+    usage = fileUsage ?? usage;
+  }
 
   cachedData = {
     ...cachedData,
@@ -167,7 +173,7 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     mostRecentSession,
     weeklyUsage: await scanWeeklyUsage(config.claudeHomePath),
     todayActivity: stats ? getTodayActivity(stats) : null,
-    usage: fileUsage ?? cachedData.usage,
+    usage,
   };
 
   // Update session monitor
@@ -187,6 +193,7 @@ async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsa
   try {
     const result = await fetchUsage();
     if (result.data) {
+      hasApiUsageData = true;
       cachedData = { ...cachedData, usage: result.data };
       updateUI();
     }
