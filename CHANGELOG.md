@@ -5,6 +5,22 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-03-29
+
+### Added
+
+- `npm run release` command — single command to lint, test, build, package, and publish
+- Marketplace icon (`"icon"` field in package.json)
+- Auto-assign author workflow for pull requests
+- GitHub pull request template
+
+### Changed
+
+- API refresh interval default changed from 60s to 1 hour (3600s)
+- Differentiated notifications: "API data refreshed" vs "Local data refreshed" for manual refreshes
+- Background API refreshes are now silent (no notification popups)
+- Renamed extension to "Claude Pulse Monitor" (`claude-pulse-monitor`)
+
 ## [0.1.1] - 2026-03-29
 
 ### Added
