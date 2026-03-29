@@ -1,0 +1,156 @@
+{
+  "name": "claude-pulse-monitor",
+  "displayName": "Claude Pulse Monitor",
+  "description": "Monitor Claude Code usage, sessions, and token consumption from your VS Code status bar.",
+  "version": "0.1.4",
+  "publisher": "AlirezaSoltaniJazi",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlirezaSoltaniJazi/claude-pulse"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "media/pulse-icon.png",
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudePulse.showDashboard",
+        "title": "Claude Pulse: Show Dashboard"
+      },
+      {
+        "command": "claudePulse.refreshData",
+        "title": "Claude Pulse: Refresh Data"
+      },
+      {
+        "command": "claudePulse.resetTimer",
+        "title": "Claude Pulse: Reset Session Timer"
+      },
+      {
+        "command": "claudePulse.toggleNotifications",
+        "title": "Claude Pulse: Toggle Notifications"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Pulse",
+      "properties": {
+        "claudePulse.statusBar.showResetTimer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show session reset countdown in status bar"
+        },
+        "claudePulse.statusBar.showTokenCount": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show today's token count in status bar"
+        },
+        "claudePulse.statusBar.showSessionCount": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show today's session count in status bar"
+        },
+        "claudePulse.sessionResetIntervalMinutes": {
+          "type": "number",
+          "default": 300,
+          "description": "Session reset interval in minutes (e.g., 300 = 5 hours for Pro plan)"
+        },
+        "claudePulse.sessionTokenLimit": {
+          "type": "number",
+          "default": 8000000,
+          "description": "Estimated token limit per 5h session window (used for usage % calculation). Calibrate by comparing with /usage in Claude CLI. Default 8M works for Max plan."
+        },
+        "claudePulse.pollingIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "How often to refresh data from Claude files (seconds)"
+        },
+        "claudePulse.usageRefreshIntervalSeconds": {
+          "type": "number",
+          "default": 3600,
+          "minimum": 60,
+          "description": "How often to refresh usage data from the Anthropic API (seconds). Default is 3600 (1 hour). Minimum 60s."
+        },
+        "claudePulse.notifications.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable notifications for Claude events"
+        },
+        "claudePulse.notifications.useSystemNotifications": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use OS-level system notifications (requires node-notifier)"
+        },
+        "claudePulse.notifications.onNewSession": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when a new Claude session starts"
+        },
+        "claudePulse.notifications.onSessionEnd": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when a Claude session ends"
+        },
+        "claudePulse.notifications.onResetTimerComplete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when the session reset timer reaches zero"
+        },
+        "claudePulse.claudeHomePath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to .claude directory (leave empty for ~/.claude)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/vitest run --coverage",
+    "prepare": "husky",
+    "release": "npm run lint && npm run format:check && npm test && npm run build && vsce package && vsce publish"
+  },
+  "lint-staged": {
+    "src/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "test/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "node-notifier": "^10.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.5.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.2",
+    "@typescript-eslint/parser": "^8.57.2",
+    "@vitest/coverage-v8": "^1.6.1",
+    "esbuild": "^0.27.4",
+    "eslint": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.3",
+    "vitest": "^1.6.1"
+  }
+}
