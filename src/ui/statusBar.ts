@@ -2,11 +2,7 @@ import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
 import { ClaudeUsage, DailyActivity, SessionFile } from '../types';
 import { formatDuration, formatNumber } from '../utils/formatting';
-import {
-  USAGE_WARNING_THRESHOLD,
-  USAGE_CRITICAL_THRESHOLD,
-  STATUS_BAR_TICK_MS,
-} from '../constants';
+import { USAGE_TIER_HIGH, USAGE_TIER_CRITICAL, STATUS_BAR_TICK_MS } from '../constants';
 
 export class StatusBar implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
@@ -74,12 +70,12 @@ export class StatusBar implements vscode.Disposable {
           tooltipParts.push(`${w.label}: ${Math.round(w.data.utilization)}%`);
         }
 
-        // Color based on max utilization
-        if (pct >= USAGE_CRITICAL_THRESHOLD) {
+        // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
+        if (pct >= USAGE_TIER_CRITICAL) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.errorBackground'
           );
-        } else if (pct >= USAGE_WARNING_THRESHOLD) {
+        } else if (pct >= USAGE_TIER_HIGH) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.warningBackground'
           );
@@ -87,18 +83,18 @@ export class StatusBar implements vscode.Disposable {
           this.statusBarItem.backgroundColor = undefined;
         }
 
-        // Reset timer — use the most utilized window's reset time
-        if (this.config.statusBar.showResetTimer && maxWindow.data.resets_at) {
-          const resetsAtMs = new Date(maxWindow.data.resets_at).getTime();
+        // Reset timer — always use 5-hour session window (most relevant to users)
+        const fiveHour = this.usage.five_hour;
+        if (this.config.statusBar.showResetTimer && fiveHour?.resets_at) {
+          const resetsAtMs = new Date(fiveHour.resets_at).getTime();
           const remaining = resetsAtMs - Date.now();
 
           if (remaining > 0) {
-            parts.push(formatDuration(remaining));
-            const resetTime = new Date(resetsAtMs).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            });
-            tooltipParts.push(`Resets at ${resetTime}`);
+            const resetDate = new Date(resetsAtMs);
+            const hh = resetDate.getHours().toString().padStart(2, '0');
+            const mm = resetDate.getMinutes().toString().padStart(2, '0');
+            parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
+            tooltipParts.push(`Resets at ${hh}:${mm}`);
           } else {
             parts.push('Ready');
             tooltipParts.push('Session reset');
@@ -118,7 +114,10 @@ export class StatusBar implements vscode.Disposable {
           const remaining = resetMs - elapsed;
 
           if (remaining > 0) {
-            parts.push(`~${formatDuration(remaining)}`);
+            const resetDate = new Date(Date.now() + remaining);
+            const hh = resetDate.getHours().toString().padStart(2, '0');
+            const mm = resetDate.getMinutes().toString().padStart(2, '0');
+            parts.push(`~${formatDuration(remaining)} (${hh}:${mm})`);
           } else {
             parts.push('Ready');
           }
