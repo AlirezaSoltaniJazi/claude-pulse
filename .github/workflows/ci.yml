@@ -7,7 +7,21 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
+  check-style:
+    name: Check Style
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+
+  test:
+    name: Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,7 +33,5 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
       - run: npm run build
       - run: npm test
