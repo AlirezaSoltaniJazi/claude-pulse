@@ -1,5 +1,5 @@
 {
-  "name": "claude-pulse",
+  "name": "claude-pulse-monitor",
   "displayName": "Claude Pulse",
   "description": "Monitor Claude Code usage, sessions, and token consumption from your VS Code status bar.",
   "version": "0.1.3",
