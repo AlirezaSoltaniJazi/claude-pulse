@@ -25,7 +25,7 @@ describe('ConfigManager', () => {
     expect(config.sessionResetIntervalMinutes).toBe(300);
     expect(config.sessionTokenLimit).toBe(8_000_000);
     expect(config.pollingIntervalSeconds).toBe(30);
-    expect(config.usageRefreshIntervalSeconds).toBe(60);
+    expect(config.usageRefreshIntervalSeconds).toBe(3600);
     expect(config.notifications.enabled).toBe(false);
     expect(config.notifications.useSystemNotifications).toBe(false);
     expect(config.notifications.onNewSession).toBe(true);

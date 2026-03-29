@@ -50,7 +50,7 @@ export function activate(context: vscode.ExtensionContext): void {
   refreshData(false);
   refreshUsageData(true);
 
-  // Periodic usage API refresh (with feedback)
+  // Periodic usage API refresh (silent — no notifications for background refreshes)
   startUsageRefreshInterval(config.usageRefreshIntervalSeconds);
 
   // Wire file watcher events — stats changes include usage data from cache file
@@ -72,7 +72,9 @@ export function activate(context: vscode.ExtensionContext): void {
   dashboardPanel.onRefreshData(async () => {
     clearScanCache();
     clearUsageCache();
-    await Promise.all([refreshData(false), refreshUsageData(true)]);
+    await refreshData(false);
+    vscode.window.showInformationMessage('Claude Pulse: Local data refreshed');
+    await refreshUsageData(true);
   });
 
   // Register commands
@@ -91,7 +93,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudePulse.refreshData', async () => {
       clearScanCache();
       clearUsageCache();
-      await Promise.all([refreshData(false), refreshUsageData(true)]);
+      await refreshData(false);
+      vscode.window.showInformationMessage('Claude Pulse: Local data refreshed');
+      await refreshUsageData(true);
     })
   );
 
@@ -136,7 +140,7 @@ function startUsageRefreshInterval(intervalSeconds: number): void {
     clearInterval(usageRefreshInterval);
   }
   const intervalMs = Math.max(intervalSeconds, 60) * 1000;
-  usageRefreshInterval = setInterval(() => refreshUsageData(true), intervalMs);
+  usageRefreshInterval = setInterval(() => refreshUsageData(false), intervalMs);
 }
 
 async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
@@ -201,7 +205,7 @@ async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsa
 function showRefreshFeedback(result: FetchUsageResult): void {
   switch (result.status) {
     case 'success':
-      vscode.window.showInformationMessage('Claude Pulse: Data refreshed successfully');
+      vscode.window.showInformationMessage('Claude Pulse: API data refreshed successfully');
       break;
     case 'rate_limited':
       vscode.window.showWarningMessage(
@@ -222,7 +226,7 @@ function showRefreshFeedback(result: FetchUsageResult): void {
       vscode.window.showWarningMessage(`Claude Pulse: ${result.message}`);
       break;
     case 'cached':
-      vscode.window.showInformationMessage('Claude Pulse: Data refreshed (from cache)');
+      vscode.window.showInformationMessage('Claude Pulse: Using cached API data');
       break;
   }
 }

@@ -51,7 +51,10 @@ export class ConfigManager implements vscode.Disposable {
       sessionResetIntervalMinutes: cfg.get<number>('sessionResetIntervalMinutes', 300),
       sessionTokenLimit: cfg.get<number>('sessionTokenLimit', 8_000_000),
       pollingIntervalSeconds: cfg.get<number>('pollingIntervalSeconds', 30),
-      usageRefreshIntervalSeconds: Math.max(cfg.get<number>('usageRefreshIntervalSeconds', 60), 60),
+      usageRefreshIntervalSeconds: Math.max(
+        cfg.get<number>('usageRefreshIntervalSeconds', 3600),
+        60
+      ),
       notifications: {
         enabled: cfg.get<boolean>('notifications.enabled', false),
         useSystemNotifications: cfg.get<boolean>('notifications.useSystemNotifications', false),
