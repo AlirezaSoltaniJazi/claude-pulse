@@ -143,3 +143,5 @@ vite.config.ts.timestamp-*
 /.idea/
 /.husky/pre-commit
 /.claude/settings.json
+/.vscode/launch.json
+/.vscode/tasks.json
