@@ -5,6 +5,25 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-29
+
+### Added
+
+- Multi-session support in dashboard — shows all active Claude sessions with individual cards
+- Five-tier usage color coding: very low (blue), low (green), medium (amber), high (orange), critical (red)
+- 24-hour clock time in status bar reset display: `80% 1h 32m (14:45)`
+
+### Changed
+
+- New marketplace icon — dark navy background with cyan pulse line (256x256, crisp quality)
+- Status bar warning threshold lowered from 75% to 70% for earlier visual feedback
+- Dashboard usage bars now use five-tier colors instead of two
+- Reset times in dashboard use 24-hour format
+
+### Fixed
+
+- API data no longer overwritten by stale local file data on file watcher refresh
+
 ## [0.1.4] - 2026-03-29
 
 ### Added
