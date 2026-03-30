@@ -5,6 +5,13 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-03-30
+
+### Fixed
+
+- Removed stale local file usage fallback — status bar shows loading state until real API data arrives
+- No more flash of incorrect usage percentage on startup
+
 ## [0.1.9] - 2026-03-30
 
 ### Fixed
@@ -12,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix crash when `extra_usage` fields are null (Cannot read properties of null reading 'toFixed')
 - Status bar reset timer now always shows the 5-hour session window instead of whichever window has highest utilization
 - API data no longer overwritten by stale local file data on file watcher refresh
-- Cleaned up changelog to match published versions
 
 ## [0.1.6] - 2026-03-29
 
