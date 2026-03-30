@@ -3,6 +3,7 @@
 src/**
 test/**
 node_modules/**
+!node_modules/node-notifier/**
 .gitignore
 .eslintrc.json
 .prettierrc

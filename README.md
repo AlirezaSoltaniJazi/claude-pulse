@@ -104,6 +104,24 @@ Claude Pulse reads data from two sources:
 - **No eval**: The dashboard webview runs only first-party JavaScript — no `eval()` or dynamic code execution
 - **Open source**: Full source code available at [github.com/AlirezaSoltaniJazi/claude-pulse](https://github.com/AlirezaSoltaniJazi/claude-pulse)
 
+## System Notifications Setup (macOS)
+
+Claude Pulse can send OS-level desktop notifications (e.g., when Claude finishes a task). To enable:
+
+1. In VS Code Settings, enable:
+   - `Claude Pulse > Notifications: Enabled` → checked
+   - `Claude Pulse > Notifications: Use System Notifications` → checked
+2. The first notification will prompt macOS to register **terminal-notifier**
+3. Go to **System Settings → Notifications → terminal-notifier** and make sure:
+   - **Allow Notifications** is turned on
+   - **Alert style** is set to **Banners** or **Alerts** (not "None")
+4. Make sure **Focus / Do Not Disturb** mode is off, or allow terminal-notifier through Focus settings
+
+After setup, you'll receive macOS notification banners for:
+- Task completion (Claude finished and is waiting for input)
+- Session start/end
+- Session reset timer complete
+
 ## Known Limitations
 
 - OAuth credential reading is currently supported on macOS (Keychain) and Linux (file-based). Windows support is not yet implemented.

@@ -5,10 +5,18 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.10] - 2026-03-30
+## [0.2.0] - 2026-03-30
+
+### Added
+
+- **Task completion notifications** — detects when Claude finishes a task and sends both VS Code and OS-level system notifications
+- Multi-session task monitoring — watches all active sessions independently with per-session idle timers and cooldowns
+- New settings: `notifications.onTaskComplete` and `taskCompletionIdleSeconds`
+- System Notifications setup guide for macOS in README
 
 ### Fixed
 
+- System notifications now work correctly (`node-notifier` marked as external in esbuild, included in VSIX package)
 - Removed stale local file usage fallback — status bar shows loading state until real API data arrives
 - No more flash of incorrect usage percentage on startup
 

@@ -104,6 +104,17 @@
           "default": true,
           "description": "Notify when the session reset timer reaches zero"
         },
+        "claudePulse.notifications.onTaskComplete": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify when Claude finishes a task and is waiting for input"
+        },
+        "claudePulse.taskCompletionIdleSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 5,
+          "description": "Seconds of inactivity after Claude's last response before considering a task complete (default: 10)"
+        },
         "claudePulse.claudeHomePath": {
           "type": "string",
           "default": "",

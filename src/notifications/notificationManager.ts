@@ -2,13 +2,18 @@ import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
 import { SessionFile } from '../types';
 import { SessionMonitor } from './sessionMonitor';
+import { TaskCompletionDetector } from '../data/taskCompletionDetector';
 
 export class NotificationManager implements vscode.Disposable {
   private disposables: vscode.Disposable[] = [];
   private config: ClaudePulseConfig;
   private resetTimerFired = false;
 
-  constructor(config: ClaudePulseConfig, sessionMonitor: SessionMonitor) {
+  constructor(
+    config: ClaudePulseConfig,
+    sessionMonitor: SessionMonitor,
+    taskCompletionDetector: TaskCompletionDetector
+  ) {
     this.config = config;
 
     this.disposables.push(
@@ -29,6 +34,15 @@ export class NotificationManager implements vscode.Disposable {
             `Claude session ended (PID: ${session.pid})`,
             `Session ${session.sessionId.substring(0, 8)} has ended`
           );
+        }
+      })
+    );
+
+    this.disposables.push(
+      taskCompletionDetector.onTaskCompleted(({ cwd }) => {
+        if (this.config.notifications.enabled && this.config.notifications.onTaskComplete) {
+          const dir = cwd.split('/').pop() || cwd;
+          this.notify('Claude finished task', `Task completed in ${dir}`);
         }
       })
     );
