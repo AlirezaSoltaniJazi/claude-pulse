@@ -5,12 +5,14 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.7] - 2026-03-30
+## [0.1.9] - 2026-03-30
 
 ### Fixed
 
 - Fix crash when `extra_usage` fields are null (Cannot read properties of null reading 'toFixed')
 - Status bar reset timer now always shows the 5-hour session window instead of whichever window has highest utilization
+- API data no longer overwritten by stale local file data on file watcher refresh
+- Cleaned up changelog to match published versions
 
 ## [0.1.6] - 2026-03-29
 
@@ -27,13 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard usage bars now use five-tier colors instead of two
 - Reset times in dashboard use 24-hour format
 
-### Fixed
-
 ## [0.1.5] - 2026-03-29
 
 ### Changed
 
-- Update package.json
+- ESLint migrated to flat config (`eslint.config.mjs`) for ESLint v10 compatibility
+- Downgraded Vitest to v1 for Node 18 compatibility in CI
 
 ## [0.1.4] - 2026-03-29
 
@@ -51,15 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Background API refreshes are now silent (no notification popups)
 - Renamed extension to "Claude Pulse Monitor" (`claude-pulse-monitor`)
 
-## [0.1.1] - 2026-03-29
+## [0.1.3] - 2026-03-29
 
 ### Added
 
 - Prettier code formatting with `.prettierrc` config
 - Enhanced ESLint rules (`eqeqeq`, `no-throw-literal`, Prettier integration)
 - Husky pre-commit hooks with lint-staged for automatic linting and formatting
-- Vitest test suite with 66 unit tests covering dataAggregator, statsReader, sessionReader, configManager, and
-  formatting utilities
+- Vitest test suite with 66 unit tests covering dataAggregator, statsReader, sessionReader, configManager, and formatting utilities
 - VS Code mock for testing (`test/__mocks__/vscode.ts`)
 - CI workflow (`.github/workflows/ci.yml`) — lint, format check, build, and test on PRs (Node 18 & 20)
 - Release workflow (`.github/workflows/release.yml`) — automated Marketplace publishing on version tags
@@ -72,8 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deduplicated `formatDuration`, `formatNumber` into shared `src/utils/formatting.ts`
 - Deduplicated `getCurrentWeekBounds`, `formatDate` into shared `src/utils/dateUtils.ts`
 - Updated all source files to import from shared utilities and constants
-- Added logging to previously empty catch blocks in usageApi, fileWatcher, notificationManager, and extension entry
-  point
+- Added logging to previously empty catch blocks in usageApi, fileWatcher, notificationManager, and extension entry point
 - Formatted all source files with Prettier
 
 ## [0.1.0] - 2025-03-28
