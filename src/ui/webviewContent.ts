@@ -301,17 +301,19 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
     })
     .join('');
 
-  const extraUsage = usage.extra_usage
-    ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+  const extra = usage.extra_usage;
+  const extraUsage =
+    extra && extra.used_credits !== null && extra.monthly_limit !== null
+      ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
         <div class="usage-bar-header">
           <span class="stat-label">Extra Usage</span>
-          <span class="stat-value">$${usage.extra_usage.used_credits.toFixed(2)} / $${usage.extra_usage.monthly_limit.toFixed(2)}</span>
+          <span class="stat-value">$${extra.used_credits.toFixed(2)} / $${extra.monthly_limit.toFixed(2)}</span>
         </div>
         <div class="usage-bar-track">
-          <div class="usage-bar-fill" style="background: ${usage.extra_usage.utilization >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, usage.extra_usage.utilization)}%;"></div>
+          <div class="usage-bar-fill" style="background: ${(extra.utilization ?? 0) >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, extra.utilization ?? 0)}%;"></div>
         </div>
       </div>`
-    : '';
+      : '';
 
   return `<div class="card">
     <h2>Usage</h2>
