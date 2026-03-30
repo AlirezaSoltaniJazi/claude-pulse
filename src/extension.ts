@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './config/configManager';
-import { readStats, readUsageFromCache } from './data/statsReader';
+import { readStats } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
@@ -19,7 +19,6 @@ let dashboardPanel: DashboardPanel;
 let sessionMonitor: SessionMonitor;
 let notificationManager: NotificationManager;
 let usageRefreshInterval: ReturnType<typeof setInterval> | null = null;
-let hasApiUsageData = false;
 
 let cachedData: ClaudePulseData = {
   stats: null,
@@ -157,13 +156,8 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     activeSessions.length > 0 ? activeSessions : sessions
   );
 
-  // Read usage from stats-cache file — only use as fallback when no API data exists.
-  // API data is more accurate and should not be overwritten by stale file data.
-  let usage = cachedData.usage;
-  if (!hasApiUsageData) {
-    const fileUsage = await readUsageFromCache(config.claudeHomePath);
-    usage = fileUsage ?? usage;
-  }
+  // Only use API data for usage — local file data is stale and unreliable.
+  const usage = cachedData.usage;
 
   cachedData = {
     ...cachedData,
@@ -193,7 +187,6 @@ async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsa
   try {
     const result = await fetchUsage();
     if (result.data) {
-      hasApiUsageData = true;
       cachedData = { ...cachedData, usage: result.data };
       updateUI();
     }
