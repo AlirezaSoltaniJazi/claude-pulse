@@ -19,8 +19,17 @@ export const LIVENESS_CHECK_INTERVAL_MS = 10_000;
 
 // Status Bar
 export const STATUS_BAR_TICK_MS = 1_000;
-export const USAGE_WARNING_THRESHOLD = 75;
-export const USAGE_CRITICAL_THRESHOLD = 90;
+// Five-tier usage thresholds (percentage boundaries)
+export const USAGE_TIER_LOW = 25; // 0-24%: very low (accent/blue)
+export const USAGE_TIER_MEDIUM = 50; // 25-49%: low (green)
+export const USAGE_TIER_HIGH = 70; // 50-69%: medium (amber)
+export const USAGE_TIER_CRITICAL = 90; // 70-89%: high (orange), 90%+: critical (red)
+
+// Task Completion Detection
+export const DEFAULT_TASK_IDLE_SECONDS = 10;
+export const MIN_TASK_IDLE_SECONDS = 5;
+export const TASK_NOTIFICATION_COOLDOWN_MS = 30_000;
+export const TASK_DETECTOR_POLL_MS = 2_000;
 
 // Config Defaults
 export const DEFAULT_POLLING_INTERVAL_SEC = 30;

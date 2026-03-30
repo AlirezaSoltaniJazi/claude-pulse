@@ -11,7 +11,9 @@ Claude Pulse gives you real-time visibility into your Claude Code activity — u
 - Live usage percentage (max across 5-hour and 7-day windows)
 - Session reset countdown timer (from API or estimated)
 - Optional message count and session count display
-- Color-coded warnings at 75% and 90% thresholds
+- Five-tier color-coded usage: blue (<25%), green (25-49%), amber (50-69%), orange (70-89%), red (90%+)
+
+![Status Bar](https://raw.githubusercontent.com/AlirezaSoltaniJazi/claude-pulse/main/media/screenshot-statusbar.png)
 
 ### Interactive Dashboard
 
@@ -24,6 +26,8 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - **Lifetime stats** — Total sessions, messages, first session date, longest session
 - **Model breakdown** — Token usage table by model (input, output, cache read, cache create)
 - **Hourly activity chart** — Visual bar chart of activity distribution by hour
+
+![Dashboard](https://raw.githubusercontent.com/AlirezaSoltaniJazi/claude-pulse/main/media/screenshot-dashboard.png)
 
 ### Real-Time Monitoring
 
@@ -103,6 +107,24 @@ Claude Pulse reads data from two sources:
 - **HTTPS only**: All API communication uses HTTPS
 - **No eval**: The dashboard webview runs only first-party JavaScript — no `eval()` or dynamic code execution
 - **Open source**: Full source code available at [github.com/AlirezaSoltaniJazi/claude-pulse](https://github.com/AlirezaSoltaniJazi/claude-pulse)
+
+## System Notifications Setup (macOS)
+
+Claude Pulse can send OS-level desktop notifications (e.g., when Claude finishes a task). To enable:
+
+1. In VS Code Settings, enable:
+   - `Claude Pulse > Notifications: Enabled` → checked
+   - `Claude Pulse > Notifications: Use System Notifications` → checked
+2. The first notification will prompt macOS to register **terminal-notifier**
+3. Go to **System Settings → Notifications → terminal-notifier** and make sure:
+   - **Allow Notifications** is turned on
+   - **Alert style** is set to **Banners** or **Alerts** (not "None")
+4. Make sure **Focus / Do Not Disturb** mode is off, or allow terminal-notifier through Focus settings
+
+After setup, you'll receive macOS notification banners for:
+- Task completion (Claude finished and is waiting for input)
+- Session start/end
+- Session reset timer complete
 
 ## Known Limitations
 

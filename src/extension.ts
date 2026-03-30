@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './config/configManager';
-import { readStats, readUsageFromCache } from './data/statsReader';
+import { readStats } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
@@ -10,6 +10,7 @@ import { StatusBar } from './ui/statusBar';
 import { DashboardPanel } from './ui/webviewPanel';
 import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
+import { TaskCompletionDetector } from './data/taskCompletionDetector';
 import { ClaudePulseData } from './types';
 
 let configManager: ConfigManager;
@@ -17,6 +18,7 @@ let fileWatcher: FileWatcher;
 let statusBar: StatusBar;
 let dashboardPanel: DashboardPanel;
 let sessionMonitor: SessionMonitor;
+let taskCompletionDetector: TaskCompletionDetector;
 let notificationManager: NotificationManager;
 let usageRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -44,7 +46,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Notifications
   sessionMonitor = new SessionMonitor();
-  notificationManager = new NotificationManager(config, sessionMonitor);
+  taskCompletionDetector = new TaskCompletionDetector(config.taskCompletionIdleSeconds);
+  notificationManager = new NotificationManager(config, sessionMonitor, taskCompletionDetector);
 
   // Initial data load (file-based first, then API in background)
   refreshData(false);
@@ -61,6 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
   configManager.onConfigChanged((newConfig) => {
     fileWatcher.updatePollingInterval(newConfig.pollingIntervalSeconds * 1000);
     startUsageRefreshInterval(newConfig.usageRefreshIntervalSeconds);
+    taskCompletionDetector.updateIdleThreshold(newConfig.taskCompletionIdleSeconds);
     notificationManager.updateConfig(newConfig);
     updateUI();
   });
@@ -126,6 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar,
     dashboardPanel,
     sessionMonitor,
+    taskCompletionDetector,
     notificationManager,
     {
       dispose: () => {
@@ -156,8 +161,8 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     activeSessions.length > 0 ? activeSessions : sessions
   );
 
-  // Read usage from stats-cache file (written by Claude Code itself)
-  const fileUsage = await readUsageFromCache(config.claudeHomePath);
+  // Only use API data for usage — local file data is stale and unreliable.
+  const usage = cachedData.usage;
 
   cachedData = {
     ...cachedData,
@@ -167,11 +172,12 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     mostRecentSession,
     weeklyUsage: await scanWeeklyUsage(config.claudeHomePath),
     todayActivity: stats ? getTodayActivity(stats) : null,
-    usage: fileUsage ?? cachedData.usage,
+    usage,
   };
 
-  // Update session monitor
+  // Update session monitor and task completion detector
   sessionMonitor.updateSessions(sessions);
+  taskCompletionDetector.updateSessions(activeSessions, config.claudeHomePath);
 
   // Check reset timer for notifications
   notificationManager.checkResetTimer(mostRecentSession, mostRecentSession?.startedAt ?? null);

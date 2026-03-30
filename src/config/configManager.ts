@@ -18,7 +18,9 @@ export interface ClaudePulseConfig {
     onNewSession: boolean;
     onSessionEnd: boolean;
     onResetTimerComplete: boolean;
+    onTaskComplete: boolean;
   };
+  taskCompletionIdleSeconds: number;
   claudeHomePath: string;
 }
 
@@ -61,7 +63,9 @@ export class ConfigManager implements vscode.Disposable {
         onNewSession: cfg.get<boolean>('notifications.onNewSession', true),
         onSessionEnd: cfg.get<boolean>('notifications.onSessionEnd', true),
         onResetTimerComplete: cfg.get<boolean>('notifications.onResetTimerComplete', true),
+        onTaskComplete: cfg.get<boolean>('notifications.onTaskComplete', true),
       },
+      taskCompletionIdleSeconds: Math.max(cfg.get<number>('taskCompletionIdleSeconds', 10), 5),
       claudeHomePath,
     };
   }

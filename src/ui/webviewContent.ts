@@ -1,6 +1,31 @@
-import { ClaudePulseData, ClaudeUsage, ModelUsage, WeeklyUsageSummary } from '../types';
+import {
+  ClaudePulseData,
+  ClaudeUsage,
+  ModelUsage,
+  SessionFile,
+  WeeklyUsageSummary,
+} from '../types';
 import { formatDurationShort, formatNumber } from '../utils/formatting';
-import { USAGE_WARNING_THRESHOLD, USAGE_CRITICAL_THRESHOLD } from '../constants';
+import {
+  USAGE_TIER_LOW,
+  USAGE_TIER_MEDIUM,
+  USAGE_TIER_HIGH,
+  USAGE_TIER_CRITICAL,
+} from '../constants';
+
+function usageColor(pct: number): string {
+  if (pct >= USAGE_TIER_CRITICAL) return 'var(--error)';
+  if (pct >= USAGE_TIER_HIGH) return 'var(--warning)';
+  if (pct >= USAGE_TIER_MEDIUM) return 'var(--amber)';
+  if (pct >= USAGE_TIER_LOW) return 'var(--success)';
+  return 'var(--accent)';
+}
+
+function format24hTime(date: Date): string {
+  const hh = date.getHours().toString().padStart(2, '0');
+  const mm = date.getMinutes().toString().padStart(2, '0');
+  return `${hh}:${mm}`;
+}
 
 export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
   return `<!DOCTYPE html>
@@ -20,6 +45,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       --success: var(--vscode-testing-iconPassed, #4caf50);
       --warning: var(--vscode-editorWarning-foreground, #ff9800);
       --error: var(--vscode-editorError-foreground, #f44336);
+      --amber: #ffb300;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -184,6 +210,15 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       padding: 12px 0;
     }
 
+    .session-count-badge {
+      background: var(--accent);
+      color: var(--bg);
+      border-radius: 10px;
+      padding: 1px 8px;
+      font-size: 0.8em;
+      font-weight: 600;
+    }
+
     .refresh-btn {
       margin-left: auto;
       background: transparent;
@@ -218,7 +253,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
 
   <div class="grid">
     ${renderUsageCard(data.usage)}
-    ${renderSessionCard(data, resetIntervalMinutes)}
+    ${renderSessionCards(data, resetIntervalMinutes)}
     ${renderWeeklyCard(data.weeklyUsage)}
     ${renderSonnetCard(data.weeklyUsage)}
     ${renderLifetimeCard(data)}
@@ -251,12 +286,7 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
     .filter((w) => w.data !== null)
     .map((w) => {
       const pct = Math.round(w.data!.utilization);
-      const color =
-        pct >= USAGE_CRITICAL_THRESHOLD
-          ? 'var(--error)'
-          : pct >= USAGE_WARNING_THRESHOLD
-            ? 'var(--warning)'
-            : 'var(--accent)';
+      const color = usageColor(pct);
       const resetStr = w.data!.resets_at ? formatResetTime(w.data!.resets_at) : '';
       return `<div class="usage-bar">
         <div class="usage-bar-header">
@@ -271,17 +301,19 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
     })
     .join('');
 
-  const extraUsage = usage.extra_usage
-    ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+  const extra = usage.extra_usage;
+  const extraUsage =
+    extra && extra.used_credits !== null && extra.monthly_limit !== null
+      ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
         <div class="usage-bar-header">
           <span class="stat-label">Extra Usage</span>
-          <span class="stat-value">$${usage.extra_usage.used_credits.toFixed(2)} / $${usage.extra_usage.monthly_limit.toFixed(2)}</span>
+          <span class="stat-value">$${extra.used_credits.toFixed(2)} / $${extra.monthly_limit.toFixed(2)}</span>
         </div>
         <div class="usage-bar-track">
-          <div class="usage-bar-fill" style="background: ${usage.extra_usage.utilization >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, usage.extra_usage.utilization)}%;"></div>
+          <div class="usage-bar-fill" style="background: ${(extra.utilization ?? 0) >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, extra.utilization ?? 0)}%;"></div>
         </div>
       </div>`
-    : '';
+      : '';
 
   return `<div class="card">
     <h2>Usage</h2>
@@ -290,72 +322,89 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
   </div>`;
 }
 
-function renderSessionCard(data: ClaudePulseData, resetIntervalMinutes: number): string {
-  const session = data.mostRecentSession;
-  const active = data.activeSessions.length > 0;
+function renderSessionCards(data: ClaudePulseData, resetIntervalMinutes: number): string {
+  const sessions: SessionFile[] =
+    data.activeSessions.length > 0
+      ? data.activeSessions
+      : data.mostRecentSession
+        ? [data.mostRecentSession]
+        : [];
 
-  if (!session) {
+  if (sessions.length === 0) {
     return `<div class="card">
-      <h2>Current Session</h2>
+      <h2>Sessions</h2>
       <p class="no-data">No Claude session detected</p>
     </div>`;
   }
 
-  const startedAt = new Date(session.startedAt);
-  const elapsed = Date.now() - session.startedAt;
+  const activePids = new Set(data.activeSessions.map((s) => s.pid));
 
+  // Compute reset display once (it's account-wide, not per-session)
   let resetDisplay: string;
   if (data.usage?.five_hour?.resets_at) {
     const resetsAtMs = new Date(data.usage.five_hour.resets_at).getTime();
     const remaining = resetsAtMs - Date.now();
-    const resetTime = new Date(resetsAtMs).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-    resetDisplay = remaining > 0 ? `${formatDurationShort(remaining)} (at ${resetTime})` : 'Ready';
+    resetDisplay =
+      remaining > 0
+        ? `${formatDurationShort(remaining)} (${format24hTime(new Date(resetsAtMs))})`
+        : 'Ready';
   } else {
+    const elapsed = Date.now() - sessions[0].startedAt;
     const resetMs = resetIntervalMinutes * 60 * 1000;
     const remaining = resetMs - elapsed;
-    resetDisplay = remaining > 0 ? `~${formatDurationShort(remaining)} (estimated)` : 'Ready';
+    resetDisplay =
+      remaining > 0
+        ? `~${formatDurationShort(remaining)} (${format24hTime(new Date(Date.now() + remaining))})`
+        : 'Ready';
   }
 
-  const costDisplay = 'N/A';
+  return sessions
+    .map((session, index) => {
+      const isActive = activePids.has(session.pid);
+      const startedAt = new Date(session.startedAt);
+      const elapsed = Date.now() - session.startedAt;
+      const title =
+        sessions.length > 1
+          ? `Session ${index + 1} of ${sessions.length} <span class="session-count-badge">${sessions.length}</span>`
+          : 'Current Session';
 
-  return `<div class="card">
-    <h2>Current Session</h2>
-    <div class="stat-row">
-      <span class="stat-label">Status</span>
-      <span class="stat-value ${active ? 'status-active' : 'status-inactive'}">${active ? 'Active' : 'Inactive'}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">PID</span>
-      <span class="stat-value">${session.pid}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Session ID</span>
-      <span class="stat-value">${session.sessionId.substring(0, 8)}...</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Working Dir</span>
-      <span class="stat-value">${session.cwd}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Started</span>
-      <span class="stat-value">${startedAt.toLocaleString()}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Duration</span>
-      <span class="stat-value">${formatDurationShort(elapsed)}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Resets</span>
-      <span class="stat-value">${resetDisplay}</span>
-    </div>
-    <div class="stat-row">
-      <span class="stat-label">Session Cost</span>
-      <span class="stat-value">${costDisplay}</span>
-    </div>
-  </div>`;
+      return `<div class="card">
+      <h2>${title}</h2>
+      <div class="stat-row">
+        <span class="stat-label">Status</span>
+        <span class="stat-value ${isActive ? 'status-active' : 'status-inactive'}">${isActive ? 'Active' : 'Inactive'}</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">PID</span>
+        <span class="stat-value">${session.pid}</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Session ID</span>
+        <span class="stat-value">${session.sessionId.substring(0, 8)}...</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Working Dir</span>
+        <span class="stat-value" title="${session.cwd}">${session.cwd}</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Started</span>
+        <span class="stat-value">${startedAt.toLocaleString()}</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Duration</span>
+        <span class="stat-value">${formatDurationShort(elapsed)}</span>
+      </div>
+      ${
+        index === 0
+          ? `<div class="stat-row">
+        <span class="stat-label">Resets</span>
+        <span class="stat-value">${resetDisplay}</span>
+      </div>`
+          : ''
+      }
+    </div>`;
+    })
+    .join('');
 }
 
 function renderWeeklyCard(weekly: WeeklyUsageSummary | null): string {
@@ -515,6 +564,5 @@ function formatResetTime(isoString: string): string {
 
   if (remaining <= 0) return 'soon';
 
-  const time = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return `in ${formatDurationShort(remaining)} (at ${time})`;
+  return `in ${formatDurationShort(remaining)} (at ${format24hTime(resetDate)})`;
 }
