@@ -5,6 +5,13 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-03-30
+
+### Fixed
+
+- Fix crash when `extra_usage` fields are null (Cannot read properties of null reading 'toFixed')
+- Status bar reset timer now always shows the 5-hour session window instead of whichever window has highest utilization
+
 ## [0.1.6] - 2026-03-29
 
 ### Added
