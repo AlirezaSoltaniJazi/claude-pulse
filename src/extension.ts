@@ -77,8 +77,7 @@ export function activate(context: vscode.ExtensionContext): void {
     clearScanCache();
     clearUsageCache();
     await refreshData(false);
-    vscode.window.showInformationMessage('Claude Pulse: Local data refreshed');
-    await refreshUsageData(true);
+    await refreshUsageData(true, true);
   });
 
   // Register commands
@@ -89,7 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
       dashboardPanel.show(cachedData, config.sessionResetIntervalMinutes);
       // Fetch fresh data in background and update
       clearUsageCache();
-      await refreshUsageData();
+      await refreshUsageData(false, true);
     })
   );
 
@@ -98,8 +97,7 @@ export function activate(context: vscode.ExtensionContext): void {
       clearScanCache();
       clearUsageCache();
       await refreshData(false);
-      vscode.window.showInformationMessage('Claude Pulse: Local data refreshed');
-      await refreshUsageData(true);
+      await refreshUsageData(true, true);
     })
   );
 
@@ -189,14 +187,21 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   }
 }
 
-async function refreshUsageData(showFeedback: boolean = false): Promise<FetchUsageResult | null> {
+async function refreshUsageData(
+  showFeedback: boolean = false,
+  forceRefresh: boolean = false
+): Promise<FetchUsageResult | null> {
   try {
-    const result = await fetchUsage();
+    const result = await fetchUsage(forceRefresh);
     if (result.data) {
       cachedData = { ...cachedData, usage: result.data };
       updateUI();
     }
-    if (showFeedback) {
+    // Always show errors/warnings; only show success on manual refresh
+    const isError = ['rate_limited', 'auth_error', 'no_credentials', 'error'].includes(
+      result.status
+    );
+    if (isError || showFeedback) {
       showRefreshFeedback(result);
     }
     return result;

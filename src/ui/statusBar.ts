@@ -83,21 +83,26 @@ export class StatusBar implements vscode.Disposable {
           this.statusBarItem.backgroundColor = undefined;
         }
 
-        // Reset timer — always use 5-hour session window (most relevant to users)
-        const fiveHour = this.usage.five_hour;
-        if (this.config.statusBar.showResetTimer && fiveHour?.resets_at) {
-          const resetsAtMs = new Date(fiveHour.resets_at).getTime();
-          const remaining = resetsAtMs - Date.now();
+        // Reset timer — prefer 5-hour window, fall back to max window
+        if (this.config.statusBar.showResetTimer) {
+          const fiveHour = this.usage.five_hour;
+          const resetSource = fiveHour?.resets_at ? fiveHour : maxWindow.data;
+          const resetsAt = resetSource?.resets_at;
 
-          if (remaining > 0) {
-            const resetDate = new Date(resetsAtMs);
-            const hh = resetDate.getHours().toString().padStart(2, '0');
-            const mm = resetDate.getMinutes().toString().padStart(2, '0');
-            parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
-            tooltipParts.push(`Resets at ${hh}:${mm}`);
-          } else {
-            parts.push('Ready');
-            tooltipParts.push('Session reset');
+          if (resetsAt) {
+            const resetsAtMs = new Date(resetsAt).getTime();
+            const remaining = resetsAtMs - Date.now();
+
+            if (remaining > 0) {
+              const resetDate = new Date(resetsAtMs);
+              const hh = resetDate.getHours().toString().padStart(2, '0');
+              const mm = resetDate.getMinutes().toString().padStart(2, '0');
+              parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
+              tooltipParts.push(`Resets at ${hh}:${mm}`);
+            } else {
+              parts.push('Ready');
+              tooltipParts.push('Session reset');
+            }
           }
         }
       } else {
