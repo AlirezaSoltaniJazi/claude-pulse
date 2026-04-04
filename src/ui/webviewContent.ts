@@ -1,6 +1,7 @@
 import {
   ClaudePulseData,
   ClaudeUsage,
+  DailyActivity,
   ModelUsage,
   SessionFile,
   WeeklyUsageSummary,
@@ -631,6 +632,113 @@ function renderSonnetCard(weekly: WeeklyUsageSummary | null): string {
   </div>`;
 }
 
+function getFavoriteModel(modelUsage: Record<string, ModelUsage>): string {
+  const entries = Object.entries(modelUsage);
+  if (entries.length === 0) return 'N/A';
+  const [model] = entries.reduce((best, curr) => {
+    const bestTotal = best[1].inputTokens + best[1].outputTokens;
+    const currTotal = curr[1].inputTokens + curr[1].outputTokens;
+    return currTotal > bestTotal ? curr : best;
+  });
+  return model.replace('claude-', '').replace(/-\d{8}$/, '');
+}
+
+function getTotalTokens(modelUsage: Record<string, ModelUsage>): number {
+  return Object.values(modelUsage).reduce(
+    (sum, m) => sum + m.inputTokens + m.outputTokens,
+    0
+  );
+}
+
+function computeStreaks(dailyActivity: DailyActivity[]): {
+  activeDays: number;
+  totalDays: number;
+  longestStreak: number;
+  currentStreak: number;
+  mostActiveDay: string;
+  mostActiveDayCount: number;
+} {
+  if (dailyActivity.length === 0) {
+    return {
+      activeDays: 0,
+      totalDays: 0,
+      longestStreak: 0,
+      currentStreak: 0,
+      mostActiveDay: 'N/A',
+      mostActiveDayCount: 0,
+    };
+  }
+
+  // Sort by date ascending
+  const sorted = [...dailyActivity]
+    .filter((d) => d.messageCount > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const activeDays = sorted.length;
+
+  // Total days from first activity to today
+  const firstDate = new Date(sorted[0]?.date ?? Date.now());
+  const totalDays = Math.max(
+    1,
+    Math.ceil((Date.now() - firstDate.getTime()) / (1000 * 60 * 60 * 24))
+  );
+
+  // Most active day
+  const most = sorted.reduce((best, curr) =>
+    curr.messageCount > best.messageCount ? curr : best
+  );
+  const mostActiveDate = new Date(most.date);
+  const mostActiveDay = `${formatShortDate(mostActiveDate)}`;
+  const mostActiveDayCount = most.messageCount;
+
+  // Build set of active dates for streak calculation
+  const activeDates = new Set(sorted.map((d) => d.date));
+
+  // Longest streak
+  let longestStreak = 0;
+  let streak = 0;
+  let prevDate: Date | null = null;
+  for (const d of sorted) {
+    const curr = new Date(d.date);
+    if (prevDate) {
+      const diffDays = Math.round(
+        (curr.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      streak = diffDays === 1 ? streak + 1 : 1;
+    } else {
+      streak = 1;
+    }
+    longestStreak = Math.max(longestStreak, streak);
+    prevDate = curr;
+  }
+
+  // Current streak (count backwards from today)
+  let currentStreak = 0;
+  const today = new Date();
+  for (let i = 0; i <= totalDays; i++) {
+    const checkDate = new Date(today);
+    checkDate.setDate(today.getDate() - i);
+    const dateStr = checkDate.toISOString().split('T')[0];
+    if (activeDates.has(dateStr)) {
+      currentStreak++;
+    } else if (i === 0) {
+      // Today might not have activity yet, skip
+      continue;
+    } else {
+      break;
+    }
+  }
+
+  return {
+    activeDays,
+    totalDays,
+    longestStreak,
+    currentStreak,
+    mostActiveDay,
+    mostActiveDayCount,
+  };
+}
+
 function renderLifetimeCard(data: ClaudePulseData): string {
   if (!data.stats) {
     return `<div class="card">
@@ -641,9 +749,20 @@ function renderLifetimeCard(data: ClaudePulseData): string {
 
   const s = data.stats;
   const firstDate = s.firstSessionDate ? new Date(s.firstSessionDate).toLocaleDateString() : 'N/A';
+  const favoriteModel = getFavoriteModel(s.modelUsage);
+  const totalTokens = getTotalTokens(s.modelUsage);
+  const streaks = computeStreaks(s.dailyActivity);
 
   return `<div class="card">
     <h2>Lifetime Stats</h2>
+    <div class="stat-row">
+      <span class="stat-label">Total Tokens</span>
+      <span class="stat-value">${formatNumber(totalTokens)}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Favorite Model</span>
+      <span class="stat-value">${favoriteModel}</span>
+    </div>
     <div class="stat-row">
       <span class="stat-label">Total Sessions</span>
       <span class="stat-value">${s.totalSessions}</span>
@@ -659,6 +778,22 @@ function renderLifetimeCard(data: ClaudePulseData): string {
     <div class="stat-row">
       <span class="stat-label">Longest Session</span>
       <span class="stat-value">${formatDurationShort(s.longestSession.duration)} (${formatNumber(s.longestSession.messageCount)} msgs)</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Active Days</span>
+      <span class="stat-value">${streaks.activeDays}/${streaks.totalDays}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Longest Streak</span>
+      <span class="stat-value">${streaks.longestStreak} day${streaks.longestStreak !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Current Streak</span>
+      <span class="stat-value">${streaks.currentStreak} day${streaks.currentStreak !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Most Active Day</span>
+      <span class="stat-value">${streaks.mostActiveDay} (${streaks.mostActiveDayCount} msgs)</span>
     </div>
   </div>`;
 }
