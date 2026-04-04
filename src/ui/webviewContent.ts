@@ -644,10 +644,7 @@ function getFavoriteModel(modelUsage: Record<string, ModelUsage>): string {
 }
 
 function getTotalTokens(modelUsage: Record<string, ModelUsage>): number {
-  return Object.values(modelUsage).reduce(
-    (sum, m) => sum + m.inputTokens + m.outputTokens,
-    0
-  );
+  return Object.values(modelUsage).reduce((sum, m) => sum + m.inputTokens + m.outputTokens, 0);
 }
 
 function computeStreaks(dailyActivity: DailyActivity[]): {
@@ -684,9 +681,7 @@ function computeStreaks(dailyActivity: DailyActivity[]): {
   );
 
   // Most active day
-  const most = sorted.reduce((best, curr) =>
-    curr.messageCount > best.messageCount ? curr : best
-  );
+  const most = sorted.reduce((best, curr) => (curr.messageCount > best.messageCount ? curr : best));
   const mostActiveDate = new Date(most.date);
   const mostActiveDay = `${formatShortDate(mostActiveDate)}`;
   const mostActiveDayCount = most.messageCount;
@@ -701,9 +696,7 @@ function computeStreaks(dailyActivity: DailyActivity[]): {
   for (const d of sorted) {
     const curr = new Date(d.date);
     if (prevDate) {
-      const diffDays = Math.round(
-        (curr.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      const diffDays = Math.round((curr.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
       streak = diffDays === 1 ? streak + 1 : 1;
     } else {
       streak = 1;
