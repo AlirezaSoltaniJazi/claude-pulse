@@ -88,11 +88,5 @@ export interface ClaudePulseData {
   weeklyUsage: WeeklyUsageSummary | null;
   todayActivity: DailyActivity | null;
   usage: ClaudeUsage | null;
-  usageStatus?:
-    | 'success'
-    | 'cached'
-    | 'rate_limited'
-    | 'auth_error'
-    | 'no_credentials'
-    | 'error';
+  usageStatus?: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'no_credentials' | 'error';
 }
