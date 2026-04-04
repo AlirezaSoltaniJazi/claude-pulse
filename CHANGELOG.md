@@ -5,6 +5,19 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-04-04
+
+### Changed
+
+- Bump `vitest` from 1.6.1 to 4.1.2
+- Bump `@vitest/coverage-v8` from 1.6.1 to 4.1.2
+- Bump `typescript` from 5.9.3 to 6.0.2
+- Bump `esbuild` from 0.27.4 to 0.28.0
+- Bump `eslint` from 10.1.0 to 10.2.0
+- Bump `@typescript-eslint/parser` from 8.57.2 to 8.58.0
+- Bump `@typescript-eslint/eslint-plugin` from 8.57.2 to 8.58.0
+- Bump `@types/node` from 25.5.0 to 25.5.2
+
 ## [0.2.4] - 2026-04-04
 
 ### Added
