@@ -145,3 +145,4 @@ vite.config.ts.timestamp-*
 /.claude/settings.json
 /.vscode/launch.json
 /.vscode/tasks.json
+/claude-pulse-monitor-*

@@ -5,6 +5,27 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-04-04
+
+### Added
+
+- **Security audit workflow** — `npm audit` runs on every PR and weekly (Monday 3 AM UTC), checking production deps, all deps, and package signatures
+- **Dependabot** — automated weekly dependency update PRs with `dependencies` and `security` labels
+- **Pre-push hook** — blocks `git push` when production dependencies have critical vulnerabilities
+- `npm run audit:security` script for local security checks
+- `PUBLISHING.md` — step-by-step guide for VS Code Marketplace publishing
+
+### Changed
+
+- Status bar now displays the 5-hour window utilization percentage, with color coding based on the max window utilization
+- Reset timer matches the displayed window instead of always using the 5-hour window directly
+- Usage data refresh now supports force refresh and shows errors/warnings automatically
+- Consolidated duplicate refresh-and-notify calls into `refreshUsageData(showFeedback, forceRefresh)`
+
+### Fixed
+
+- `.gitignore` now excludes `claude-pulse-monitor-*` packaged extension files
+
 ## [0.2.1] - 2026-03-30
 
 ### Changed

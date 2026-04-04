@@ -62,7 +62,9 @@ export class StatusBar implements vscode.Disposable {
           (max, w) => (w.data.utilization > max.data.utilization ? w : max),
           windows[0]
         );
-        const pct = Math.round(maxWindow.data.utilization);
+        const displayWindow = windows.find((w) => w.label === '5h') ?? maxWindow;
+        const pct = Math.round(displayWindow.data.utilization);
+        const maxPct = Math.round(maxWindow.data.utilization);
         parts.push(`${pct}%`);
 
         // Show all windows in tooltip
@@ -71,11 +73,11 @@ export class StatusBar implements vscode.Disposable {
         }
 
         // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
-        if (pct >= USAGE_TIER_CRITICAL) {
+        if (maxPct >= USAGE_TIER_CRITICAL) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.errorBackground'
           );
-        } else if (pct >= USAGE_TIER_HIGH) {
+        } else if (maxPct >= USAGE_TIER_HIGH) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.warningBackground'
           );
@@ -83,21 +85,24 @@ export class StatusBar implements vscode.Disposable {
           this.statusBarItem.backgroundColor = undefined;
         }
 
-        // Reset timer — always use 5-hour session window (most relevant to users)
-        const fiveHour = this.usage.five_hour;
-        if (this.config.statusBar.showResetTimer && fiveHour?.resets_at) {
-          const resetsAtMs = new Date(fiveHour.resets_at).getTime();
-          const remaining = resetsAtMs - Date.now();
+        // Reset timer — matches the displayed window (5h preferred, max fallback)
+        if (this.config.statusBar.showResetTimer) {
+          const resetsAt = displayWindow.data.resets_at;
 
-          if (remaining > 0) {
-            const resetDate = new Date(resetsAtMs);
-            const hh = resetDate.getHours().toString().padStart(2, '0');
-            const mm = resetDate.getMinutes().toString().padStart(2, '0');
-            parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
-            tooltipParts.push(`Resets at ${hh}:${mm}`);
-          } else {
-            parts.push('Ready');
-            tooltipParts.push('Session reset');
+          if (resetsAt) {
+            const resetsAtMs = new Date(resetsAt).getTime();
+            const remaining = resetsAtMs - Date.now();
+
+            if (remaining > 0) {
+              const resetDate = new Date(resetsAtMs);
+              const hh = resetDate.getHours().toString().padStart(2, '0');
+              const mm = resetDate.getMinutes().toString().padStart(2, '0');
+              parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
+              tooltipParts.push(`Resets at ${hh}:${mm}`);
+            } else {
+              parts.push('Ready');
+              tooltipParts.push('Session reset');
+            }
           }
         }
       } else {

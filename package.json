@@ -133,6 +133,7 @@
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
     "test:coverage": "node --experimental-vm-modules node_modules/.bin/vitest run --coverage",
     "prepare": "husky",
+    "audit:security": "npm audit --omit=dev --audit-level=critical",
     "release": "npm run lint && npm run format:check && npm test && npm run build && vsce package && vsce publish"
   },
   "lint-staged": {
