@@ -19,6 +19,9 @@ async function main() {
       {
         name: 'watch-plugin',
         setup(build) {
+          build.onStart(() => {
+            console.log('[watch] build started');
+          });
           build.onEnd((result) => {
             if (result.errors.length > 0) {
               console.error('[watch] build failed:', result.errors);
