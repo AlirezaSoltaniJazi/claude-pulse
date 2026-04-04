@@ -1,0 +1,79 @@
+name: PR - Security Audit
+
+on:
+  pull_request:
+  schedule:
+    # Runs every Monday at 3:00 AM UTC
+    - cron: '0 3 * * 1'
+
+jobs:
+  security-audit:
+    name: Dependency Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Security Audit (Production)
+        id: audit-production
+        continue-on-error: true
+        run: npm audit --omit=dev --audit-level=critical
+
+      - name: Run Security Audit (All Dependencies)
+        id: audit-all
+        continue-on-error: true
+        run: npm audit --audit-level=critical
+
+      - name: Check Package Signatures
+        id: signatures
+        continue-on-error: true
+        run: npm audit signatures
+
+      - name: Report Status
+        run: |
+          echo "## Security Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.audit-production.outcome }}" == "failure" ]; then
+            echo "::error::Production dependencies have CRITICAL vulnerabilities."
+            echo ":x: **Production audit**: CRITICAL vulnerabilities found" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":white_check_mark: **Production audit**: No CRITICAL vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ steps.audit-all.outcome }}" == "failure" ]; then
+            echo "::warning::Dependencies have CRITICAL vulnerabilities. Run 'npm audit' locally to review."
+            echo ":warning: **Full audit**: CRITICAL vulnerabilities found (may include dev dependencies)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":white_check_mark: **Full audit**: No CRITICAL vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ steps.signatures.outcome }}" == "failure" ]; then
+            echo "::warning::Some packages failed signature verification. Run 'npm audit signatures' locally to review."
+            echo ":warning: **Signatures**: Some packages lack provenance" >> $GITHUB_STEP_SUMMARY
+          else
+            echo ":white_check_mark: **Signatures**: All verifiable packages have valid signatures" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "_Run \`npm audit\` locally for full details._" >> $GITHUB_STEP_SUMMARY
+
+          # Fail only if production dependencies have CRITICAL vulnerabilities
+          if [ "${{ steps.audit-production.outcome }}" == "failure" ]; then
+            echo ""
+            echo "Failing because production dependencies have CRITICAL vulnerabilities."
+            echo "Run 'npm audit --omit=dev' locally to review and fix."
+            exit 1
+          fi
