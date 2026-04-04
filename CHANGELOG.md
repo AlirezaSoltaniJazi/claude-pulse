@@ -5,6 +5,27 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-04-04
+
+### Added
+
+- **Collapsible dashboard sections** — dashboard reorganized into Usage, Sessions, Tokens, and Activity sections with click-to-toggle expand/collapse
+- **Date-aware reset times** — weekly reset times now show the full date (e.g., `at Sun Apr 6 22:00`) instead of just the time
+- **Usage status subtitle** — dashboard header now shows "Live data", "Cached data", or "Cached data (API rate limited)" based on actual fetch status
+- `npm run audit:security` script for local dependency vulnerability checks
+- `currency` field support in Extra Usage for correct currency symbol display
+
+### Fixed
+
+- **Extra Usage showing `$0.00 / $1000.00`** — values are now correctly converted from cents to the main currency unit (e.g., `£0.00 / £10.00`)
+- Extra Usage now shows "Not enabled" when `is_enabled` is false, and hides entirely when the monthly limit is zero
+- Currency symbol now matches account currency (GBP → £, EUR → €, etc.) instead of hardcoded `$`
+- Working directory in session cards now wraps properly — label stays on one line, path wraps up to 3 lines with ellipsis, full path on hover
+
+### Changed
+
+- Added `@vscode/vsce` as a dev dependency for local packaging and publishing
+
 ## [0.2.3] - 2026-04-04
 
 ### Changed
