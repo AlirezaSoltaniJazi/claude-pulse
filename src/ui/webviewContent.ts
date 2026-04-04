@@ -158,8 +158,19 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       padding: 4px 0;
     }
 
-    .stat-label { color: var(--muted); }
+    .stat-label { color: var(--muted); white-space: nowrap; }
     .stat-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    .cwd-value {
+      word-break: break-all;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 70%;
+      text-align: right;
+    }
 
     .stat-highlight {
       font-size: 1.8em;
@@ -546,7 +557,7 @@ function renderSessionCards(data: ClaudePulseData, resetIntervalMinutes: number)
       </div>
       <div class="stat-row">
         <span class="stat-label">Working Dir</span>
-        <span class="stat-value" title="${session.cwd}">${session.cwd}</span>
+        <span class="stat-value cwd-value" title="${session.cwd}">${session.cwd}</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">Started</span>
