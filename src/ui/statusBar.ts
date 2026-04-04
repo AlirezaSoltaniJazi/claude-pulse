@@ -62,7 +62,9 @@ export class StatusBar implements vscode.Disposable {
           (max, w) => (w.data.utilization > max.data.utilization ? w : max),
           windows[0]
         );
-        const pct = Math.round(maxWindow.data.utilization);
+        const displayWindow = windows.find((w) => w.label === '5h') ?? maxWindow;
+        const pct = Math.round(displayWindow.data.utilization);
+        const maxPct = Math.round(maxWindow.data.utilization);
         parts.push(`${pct}%`);
 
         // Show all windows in tooltip
@@ -71,11 +73,11 @@ export class StatusBar implements vscode.Disposable {
         }
 
         // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
-        if (pct >= USAGE_TIER_CRITICAL) {
+        if (maxPct >= USAGE_TIER_CRITICAL) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.errorBackground'
           );
-        } else if (pct >= USAGE_TIER_HIGH) {
+        } else if (maxPct >= USAGE_TIER_HIGH) {
           this.statusBarItem.backgroundColor = new vscode.ThemeColor(
             'statusBarItem.warningBackground'
           );
@@ -83,11 +85,9 @@ export class StatusBar implements vscode.Disposable {
           this.statusBarItem.backgroundColor = undefined;
         }
 
-        // Reset timer — prefer 5-hour window, fall back to max window
+        // Reset timer — matches the displayed window (5h preferred, max fallback)
         if (this.config.statusBar.showResetTimer) {
-          const fiveHour = this.usage.five_hour;
-          const resetSource = fiveHour?.resets_at ? fiveHour : maxWindow.data;
-          const resetsAt = resetSource?.resets_at;
+          const resetsAt = displayWindow.data.resets_at;
 
           if (resetsAt) {
             const resetsAtMs = new Date(resetsAt).getTime();
