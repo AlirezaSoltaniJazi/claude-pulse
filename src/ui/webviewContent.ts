@@ -27,6 +27,44 @@ function format24hTime(date: Date): string {
   return `${hh}:${mm}`;
 }
 
+function formatShortDate(date: Date): string {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return `${days[date.getDay()]} ${months[date.getMonth()]} ${date.getDate()}`;
+}
+
+function getSubtitleText(data: ClaudePulseData): string {
+  if (data.usage) {
+    switch (data.usageStatus) {
+      case 'success':
+        return 'Live data from Anthropic API';
+      case 'cached':
+        return 'Cached data from Anthropic API';
+      case 'rate_limited':
+        return 'Cached data (API rate limited)';
+      default:
+        return 'API data';
+    }
+  }
+  if (data.stats) {
+    return `Stats cached from ${data.stats.lastComputedDate}`;
+  }
+  return 'No data available';
+}
+
 export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -235,12 +273,58 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     .refresh-btn:hover {
       background: var(--border);
     }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 8px 0;
+      user-select: none;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .section-header:hover {
+      opacity: 0.8;
+    }
+
+    .section-header h2 {
+      font-size: 1.1em;
+      font-weight: 600;
+      color: var(--fg);
+      margin: 0;
+    }
+
+    .section-toggle {
+      font-size: 0.8em;
+      color: var(--muted);
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+
+    .section-toggle.collapsed {
+      transform: rotate(-90deg);
+    }
+
+    .section-content {
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .section-content.collapsed {
+      max-height: 0 !important;
+    }
   </style>
 </head>
 <body>
   <div class="dashboard-header">
     <h1>Claude Pulse</h1>
-    <span class="subtitle">${data.usage ? 'Live data from Anthropic API' : data.stats ? `Stats cached from ${data.stats.lastComputedDate}` : 'No data available'}</span>
+    <span class="subtitle">${getSubtitleText(data)}</span>
     <button class="refresh-btn" onclick="refreshData()">Refresh</button>
   </div>
 
@@ -249,19 +333,73 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     function refreshData() {
       vscode.postMessage({ command: 'refreshData' });
     }
+    function toggleSection(name) {
+      const content = document.getElementById('content-' + name);
+      const toggle = document.getElementById('toggle-' + name);
+      if (content.classList.contains('collapsed')) {
+        content.style.maxHeight = content.scrollHeight + 'px';
+        content.classList.remove('collapsed');
+        toggle.classList.remove('collapsed');
+        setTimeout(function() { content.style.maxHeight = 'none'; }, 300);
+      } else {
+        content.style.maxHeight = content.scrollHeight + 'px';
+        content.offsetHeight;
+        content.style.maxHeight = '0';
+        content.classList.add('collapsed');
+        toggle.classList.add('collapsed');
+      }
+    }
   </script>
 
-  <div class="grid">
-    ${renderUsageCard(data.usage)}
-    ${renderSessionCards(data, resetIntervalMinutes)}
-    ${renderWeeklyCard(data.weeklyUsage)}
-    ${renderSonnetCard(data.weeklyUsage)}
-    ${renderLifetimeCard(data)}
+  <div class="section">
+    <div class="section-header" onclick="toggleSection('usage')">
+      <span class="section-toggle" id="toggle-usage">&#9660;</span>
+      <h2>Usage</h2>
+    </div>
+    <div class="section-content" id="content-usage">
+      <div class="grid">
+        ${renderUsageCard(data.usage)}
+      </div>
+    </div>
   </div>
 
-  <div class="grid">
-    ${renderModelBreakdownCard(data)}
-    ${renderHourlyCard(data)}
+  <div class="section">
+    <div class="section-header" onclick="toggleSection('sessions')">
+      <span class="section-toggle" id="toggle-sessions">&#9660;</span>
+      <h2>Sessions</h2>
+    </div>
+    <div class="section-content" id="content-sessions">
+      <div class="grid">
+        ${renderSessionCards(data, resetIntervalMinutes)}
+        ${renderLifetimeCard(data)}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" onclick="toggleSection('tokens')">
+      <span class="section-toggle" id="toggle-tokens">&#9660;</span>
+      <h2>Tokens</h2>
+    </div>
+    <div class="section-content" id="content-tokens">
+      <div class="grid">
+        ${renderWeeklyCard(data.weeklyUsage)}
+        ${renderSonnetCard(data.weeklyUsage)}
+        ${renderModelBreakdownCard(data)}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header" onclick="toggleSection('activity')">
+      <span class="section-toggle" id="toggle-activity">&#9660;</span>
+      <h2>Activity</h2>
+    </div>
+    <div class="section-content" id="content-activity">
+      <div class="grid">
+        ${renderHourlyCard(data)}
+      </div>
+    </div>
   </div>
 </body>
 </html>`;
@@ -302,9 +440,17 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
     .join('');
 
   const extra = usage.extra_usage;
-  const extraUsage =
-    extra && extra.used_credits !== null && extra.monthly_limit !== null
-      ? `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+  let extraUsage = '';
+  if (extra) {
+    if (!extra.is_enabled) {
+      extraUsage = `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
+        <div class="usage-bar-header">
+          <span class="stat-label">Extra Usage</span>
+          <span class="stat-value" style="color: var(--muted)">Not enabled</span>
+        </div>
+      </div>`;
+    } else if (extra.monthly_limit > 0) {
+      extraUsage = `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
         <div class="usage-bar-header">
           <span class="stat-label">Extra Usage</span>
           <span class="stat-value">$${extra.used_credits.toFixed(2)} / $${extra.monthly_limit.toFixed(2)}</span>
@@ -312,8 +458,9 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
         <div class="usage-bar-track">
           <div class="usage-bar-fill" style="background: ${(extra.utilization ?? 0) >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, extra.utilization ?? 0)}%;"></div>
         </div>
-      </div>`
-      : '';
+      </div>`;
+    }
+  }
 
   return `<div class="card">
     <h2>Usage</h2>
@@ -564,5 +711,15 @@ function formatResetTime(isoString: string): string {
 
   if (remaining <= 0) return 'soon';
 
-  return `in ${formatDurationShort(remaining)} (at ${format24hTime(resetDate)})`;
+  const now = new Date();
+  const isSameDay =
+    resetDate.getFullYear() === now.getFullYear() &&
+    resetDate.getMonth() === now.getMonth() &&
+    resetDate.getDate() === now.getDate();
+
+  const timeStr = isSameDay
+    ? `at ${format24hTime(resetDate)}`
+    : `at ${formatShortDate(resetDate)} ${format24hTime(resetDate)}`;
+
+  return `in ${formatDurationShort(remaining)} (${timeStr})`;
 }

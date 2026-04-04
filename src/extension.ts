@@ -194,8 +194,10 @@ async function refreshUsageData(
   try {
     const result = await fetchUsage(forceRefresh);
     if (result.data) {
-      cachedData = { ...cachedData, usage: result.data };
+      cachedData = { ...cachedData, usage: result.data, usageStatus: result.status };
       updateUI();
+    } else {
+      cachedData = { ...cachedData, usageStatus: result.status };
     }
     // Always show errors/warnings; only show success on manual refresh
     const isError = ['rate_limited', 'auth_error', 'no_credentials', 'error'].includes(
