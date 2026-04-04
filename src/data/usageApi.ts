@@ -71,7 +71,7 @@ export async function fetchUsage(forceRefresh: boolean = false): Promise<FetchUs
     const result = await callUsageApi(credentials.accessToken);
     if (result.data) {
       log(
-        `Usage API success: 5h=${result.data.five_hour?.utilization}%, 7d=${result.data.seven_day?.utilization}%`
+        `Usage API success: 5h=${result.data.five_hour?.utilization}%, 7d=${result.data.seven_day?.utilization}%, extra=${JSON.stringify(result.data.extra_usage)}`
       );
       cache = { data: result.data, timestamp: Date.now() };
       return { data: result.data, status: 'success', message: 'Usage data refreshed from API' };

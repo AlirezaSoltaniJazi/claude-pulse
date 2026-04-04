@@ -27,6 +27,18 @@ function format24hTime(date: Date): string {
   return `${hh}:${mm}`;
 }
 
+function getCurrencySymbol(currency?: string): string {
+  const symbols: Record<string, string> = {
+    usd: '$',
+    gbp: '£',
+    eur: '€',
+    jpy: '¥',
+    cad: 'CA$',
+    aud: 'A$',
+  };
+  return currency ? (symbols[currency.toLowerCase()] ?? currency.toUpperCase() + ' ') : '$';
+}
+
 function formatShortDate(date: Date): string {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const months = [
@@ -450,10 +462,13 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
         </div>
       </div>`;
     } else if (extra.monthly_limit > 0) {
+      const currencySymbol = getCurrencySymbol(extra.currency);
+      const spent = (extra.used_credits / 100).toFixed(2);
+      const limit = (extra.monthly_limit / 100).toFixed(2);
       extraUsage = `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
         <div class="usage-bar-header">
           <span class="stat-label">Extra Usage</span>
-          <span class="stat-value">$${extra.used_credits.toFixed(2)} / $${extra.monthly_limit.toFixed(2)}</span>
+          <span class="stat-value">${currencySymbol}${spent} / ${currencySymbol}${limit}</span>
         </div>
         <div class="usage-bar-track">
           <div class="usage-bar-fill" style="background: ${(extra.utilization ?? 0) >= 100 ? 'var(--error)' : 'var(--accent)'}; width: ${Math.min(100, extra.utilization ?? 0)}%;"></div>

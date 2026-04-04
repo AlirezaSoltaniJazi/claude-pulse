@@ -70,6 +70,7 @@ export interface ExtraUsage {
   monthly_limit: number;
   used_credits: number;
   utilization: number;
+  currency?: string;
 }
 
 export interface ClaudeUsage {
