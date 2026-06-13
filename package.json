@@ -109,6 +109,11 @@
           "default": true,
           "description": "Notify when Claude finishes a task and is waiting for input"
         },
+        "claudePulse.notifications.onApiRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation notification when API usage data is manually refreshed (e.g. 'API data refreshed successfully'). Disable to silence these toasts; errors and warnings are always shown."
+        },
         "claudePulse.taskCompletionIdleSeconds": {
           "type": "number",
           "default": 10,

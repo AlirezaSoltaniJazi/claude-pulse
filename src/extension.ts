@@ -216,9 +216,12 @@ async function refreshUsageData(
 }
 
 function showRefreshFeedback(result: FetchUsageResult): void {
+  const showRefreshConfirmation = configManager.getConfig().notifications.onApiRefresh;
   switch (result.status) {
     case 'success':
-      vscode.window.showInformationMessage('Claude Pulse: API data refreshed successfully');
+      if (showRefreshConfirmation) {
+        vscode.window.showInformationMessage('Claude Pulse: API data refreshed successfully');
+      }
       break;
     case 'rate_limited':
       vscode.window.showWarningMessage(
@@ -239,7 +242,9 @@ function showRefreshFeedback(result: FetchUsageResult): void {
       vscode.window.showWarningMessage(`Claude Pulse: ${result.message}`);
       break;
     case 'cached':
-      vscode.window.showInformationMessage('Claude Pulse: Using cached API data');
+      if (showRefreshConfirmation) {
+        vscode.window.showInformationMessage('Claude Pulse: Using cached API data');
+      }
       break;
   }
 }

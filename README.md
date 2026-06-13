@@ -80,6 +80,7 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `notifications.onNewSession` | boolean | `true` | Notify when a new Claude session starts |
 | `notifications.onSessionEnd` | boolean | `true` | Notify when a Claude session ends |
 | `notifications.onResetTimerComplete` | boolean | `true` | Notify when the session reset timer reaches zero |
+| `notifications.onApiRefresh` | boolean | `true` | Show a confirmation toast when API usage data is manually refreshed (errors are always shown) |
 | `claudeHomePath` | string | `""` | Custom path to .claude directory (leave empty for `~/.claude`) |
 
 ## Commands

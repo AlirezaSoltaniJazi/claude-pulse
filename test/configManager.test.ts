@@ -31,7 +31,17 @@ describe('ConfigManager', () => {
     expect(config.notifications.onNewSession).toBe(true);
     expect(config.notifications.onSessionEnd).toBe(true);
     expect(config.notifications.onResetTimerComplete).toBe(true);
+    expect(config.notifications.onTaskComplete).toBe(true);
+    expect(config.notifications.onApiRefresh).toBe(true);
     expect(config.claudeHomePath).toBe(path.join(os.homedir(), '.claude'));
+  });
+
+  it('should respect notifications.onApiRefresh when disabled', () => {
+    setMockConfig({ 'notifications.onApiRefresh': false });
+
+    const config = configManager.getConfig();
+
+    expect(config.notifications.onApiRefresh).toBe(false);
   });
 
   it('should return custom values when overrides are set', () => {
