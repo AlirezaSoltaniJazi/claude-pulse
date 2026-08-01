@@ -4,6 +4,7 @@ import { readStats } from './data/statsReader';
 import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
+import { readModelInfo, clearModelCache } from './data/modelReader';
 import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
@@ -11,7 +12,7 @@ import { DashboardPanel } from './ui/webviewPanel';
 import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
-import { ClaudePulseData } from './types';
+import { ClaudePulseData, SessionFile } from './types';
 
 let configManager: ConfigManager;
 let fileWatcher: FileWatcher;
@@ -30,6 +31,7 @@ let cachedData: ClaudePulseData = {
   weeklyUsage: null,
   todayActivity: null,
   usage: null,
+  modelInfo: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -76,6 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
   dashboardPanel.onRefreshData(async () => {
     clearScanCache();
     clearUsageCache();
+    clearModelCache();
     await refreshData(false);
     await refreshUsageData(true, true);
   });
@@ -96,6 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('claudePulse.refreshData', async () => {
       clearScanCache();
       clearUsageCache();
+      clearModelCache();
       await refreshData(false);
       await refreshUsageData(true, true);
     })
@@ -146,6 +150,17 @@ function startUsageRefreshInterval(intervalSeconds: number): void {
   usageRefreshInterval = setInterval(() => refreshUsageData(false), intervalMs);
 }
 
+/**
+ * The single session the status bar describes. Shared by refreshData() and updateUI()
+ * so the model never belongs to a different session than the reset timer.
+ */
+function pickPrimarySession(
+  activeSessions: SessionFile[],
+  mostRecentSession: SessionFile | null
+): SessionFile | null {
+  return activeSessions.length > 0 ? activeSessions[0] : mostRecentSession;
+}
+
 async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   const config = configManager.getConfig();
 
@@ -158,6 +173,13 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   const mostRecentSession = getMostRecentSession(
     activeSessions.length > 0 ? activeSessions : sessions
   );
+  const primarySession = pickPrimarySession(activeSessions, mostRecentSession);
+
+  // Reads that depend on the resolved session, run in parallel with the weekly scan.
+  const [weeklyUsage, modelInfo] = await Promise.all([
+    scanWeeklyUsage(config.claudeHomePath),
+    readModelInfo(config.claudeHomePath, primarySession, activeSessions.length > 0),
+  ]);
 
   // Only use API data for usage — local file data is stale and unreliable.
   const usage = cachedData.usage;
@@ -168,9 +190,10 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     sessions,
     activeSessions,
     mostRecentSession,
-    weeklyUsage: await scanWeeklyUsage(config.claudeHomePath),
+    weeklyUsage,
     todayActivity: stats ? getTodayActivity(stats) : null,
     usage,
+    modelInfo,
   };
 
   // Update session monitor and task completion detector
@@ -252,12 +275,15 @@ function showRefreshFeedback(result: FetchUsageResult): void {
 function updateUI(): void {
   const config = configManager.getConfig();
 
-  const activeSession =
-    cachedData.activeSessions.length > 0
-      ? cachedData.activeSessions[0]
-      : cachedData.mostRecentSession;
+  const activeSession = pickPrimarySession(cachedData.activeSessions, cachedData.mostRecentSession);
 
-  statusBar.update(config, activeSession, cachedData.todayActivity, cachedData.usage);
+  statusBar.update(
+    config,
+    activeSession,
+    cachedData.todayActivity,
+    cachedData.usage,
+    cachedData.modelInfo
+  );
 
   if (dashboardPanel.isVisible) {
     dashboardPanel.update(cachedData, config.sessionResetIntervalMinutes);

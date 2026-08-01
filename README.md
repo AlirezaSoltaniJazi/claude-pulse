@@ -71,6 +71,8 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `statusBar.showResetTimer` | boolean | `true` | Show session reset countdown in status bar |
 | `statusBar.showTokenCount` | boolean | `false` | Show today's message count in status bar |
 | `statusBar.showSessionCount` | boolean | `false` | Show today's session count in status bar |
+| `statusBar.showModel` | boolean | `true` | Show the Claude model currently in use (e.g. `Opus 5`) in status bar |
+| `statusBar.showEffort` | boolean | `true` | Show the model's reasoning effort level (e.g. `xhigh`) in status bar |
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
 | `sessionTokenLimit` | number | `8000000` | Estimated token limit per session window (for usage % calculation) |
 | `pollingIntervalSeconds` | number | `30` | How often to check Claude files for changes (min: 5) |

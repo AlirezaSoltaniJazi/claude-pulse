@@ -22,6 +22,8 @@ describe('ConfigManager', () => {
     expect(config.statusBar.showResetTimer).toBe(true);
     expect(config.statusBar.showTokenCount).toBe(false);
     expect(config.statusBar.showSessionCount).toBe(false);
+    expect(config.statusBar.showModel).toBe(true);
+    expect(config.statusBar.showEffort).toBe(true);
     expect(config.sessionResetIntervalMinutes).toBe(300);
     expect(config.sessionTokenLimit).toBe(8_000_000);
     expect(config.pollingIntervalSeconds).toBe(30);
@@ -49,6 +51,8 @@ describe('ConfigManager', () => {
       'statusBar.showResetTimer': false,
       'statusBar.showTokenCount': true,
       'statusBar.showSessionCount': true,
+      'statusBar.showModel': false,
+      'statusBar.showEffort': false,
       sessionResetIntervalMinutes: 600,
       sessionTokenLimit: 4_000_000,
       pollingIntervalSeconds: 15,
@@ -60,6 +64,8 @@ describe('ConfigManager', () => {
     expect(config.statusBar.showResetTimer).toBe(false);
     expect(config.statusBar.showTokenCount).toBe(true);
     expect(config.statusBar.showSessionCount).toBe(true);
+    expect(config.statusBar.showModel).toBe(false);
+    expect(config.statusBar.showEffort).toBe(false);
     expect(config.sessionResetIntervalMinutes).toBe(600);
     expect(config.sessionTokenLimit).toBe(4_000_000);
     expect(config.pollingIntervalSeconds).toBe(15);

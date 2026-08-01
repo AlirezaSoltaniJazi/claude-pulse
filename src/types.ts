@@ -81,6 +81,20 @@ export interface ClaudeUsage {
   extra_usage: ExtraUsage | null;
 }
 
+/** Where the effort value was resolved from — 'settings' means a global default, not session truth. */
+export type EffortSource = 'transcript' | 'settings';
+
+export interface ModelInfo {
+  /** Raw model id exactly as it appeared in the transcript, e.g. 'claude-opus-5'. */
+  model: string | null;
+  /** Raw effort value, e.g. 'xhigh'. Null when neither transcript nor settings.json had one. */
+  effort: string | null;
+  /** Null only when effort is null. */
+  effortSource: EffortSource | null;
+  /** True when the owning session's process is alive. Computed in the data layer, never in the UI. */
+  isSessionLive: boolean;
+}
+
 export interface ClaudePulseData {
   stats: StatsCache | null;
   sessions: SessionFile[];
@@ -89,5 +103,6 @@ export interface ClaudePulseData {
   weeklyUsage: WeeklyUsageSummary | null;
   todayActivity: DailyActivity | null;
   usage: ClaudeUsage | null;
+  modelInfo: ModelInfo | null;
   usageStatus?: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'no_credentials' | 'error';
 }

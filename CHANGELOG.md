@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Model and effort level in the status bar** — a new trailing segment shows the Claude model currently in use
+  and its reasoning effort level, e.g. `$(sparkle) Opus 5 · xhigh`. Both values come from the last assistant
+  record in the active session's transcript (`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`); the effort
+  falls back to the global `effortLevel` in `~/.claude/settings.json` for models that predate the per-turn field,
+  which the tooltip marks as `(global default)`. When the owning session's process is no longer alive the segment
+  is prefixed with `~`, matching the existing estimated-timer convention.
+  Controlled by two new settings, **both defaulting to `true`**, so the status bar gains this segment on upgrade:
+  `claudePulse.statusBar.showModel` and `claudePulse.statusBar.showEffort`. Set either to `false` to hide that
+  half; set both to `false` to restore the previous status bar exactly. Only the tail of the transcript is read,
+  so the cost does not grow with session length.
+
 ### Security
 
 - Regenerated `package-lock.json`, clearing 8 advisories (7 high, 1 moderate) in transitive dev dependencies:

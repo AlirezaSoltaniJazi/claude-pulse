@@ -14,6 +14,20 @@ export const KEYCHAIN_TIMEOUT_MS = 10_000;
 // JSONL Scanner
 export const SCAN_CACHE_TTL_MS = 60_000;
 
+// Model Reader
+/** Deliberately below the default 30s poll so a scheduled refresh is never served stale data. */
+export const MODEL_INFO_CACHE_TTL_MS = 10_000;
+/** settings.json changes far less often than a transcript. */
+export const SETTINGS_CACHE_TTL_MS = 60_000;
+/** Tail window for the transcript read — covers >99% of real files' last assistant record. */
+export const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
+/** One widening step. Never read the whole file: transcripts reach many megabytes. */
+export const TRANSCRIPT_TAIL_MAX_BYTES = 256 * 1024;
+/** Assistant records carrying this model id are injected interrupt/API-error placeholders. */
+export const SYNTHETIC_MODEL_ID = '<synthetic>';
+/** U+00B7 MIDDLE DOT — escaped to keep the source ASCII-only. */
+export const MODEL_EFFORT_SEPARATOR = ' \u00B7 ';
+
 // Session Monitor
 export const LIVENESS_CHECK_INTERVAL_MS = 10_000;
 

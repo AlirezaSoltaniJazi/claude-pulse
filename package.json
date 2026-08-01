@@ -57,6 +57,16 @@
           "default": false,
           "description": "Show today's session count in status bar"
         },
+        "claudePulse.statusBar.showModel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Claude model currently in use (e.g. 'Opus 5') in the status bar"
+        },
+        "claudePulse.statusBar.showEffort": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the model's reasoning effort level (e.g. 'xhigh') in the status bar. Read from the active session transcript, falling back to the global effortLevel in ~/.claude/settings.json."
+        },
         "claudePulse.sessionResetIntervalMinutes": {
           "type": "number",
           "default": 300,

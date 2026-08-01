@@ -7,6 +7,8 @@ export interface ClaudePulseConfig {
     showResetTimer: boolean;
     showTokenCount: boolean;
     showSessionCount: boolean;
+    showModel: boolean;
+    showEffort: boolean;
   };
   sessionResetIntervalMinutes: number;
   sessionTokenLimit: number;
@@ -50,6 +52,8 @@ export class ConfigManager implements vscode.Disposable {
         showResetTimer: cfg.get<boolean>('statusBar.showResetTimer', true),
         showTokenCount: cfg.get<boolean>('statusBar.showTokenCount', false),
         showSessionCount: cfg.get<boolean>('statusBar.showSessionCount', false),
+        showModel: cfg.get<boolean>('statusBar.showModel', true),
+        showEffort: cfg.get<boolean>('statusBar.showEffort', true),
       },
       sessionResetIntervalMinutes: cfg.get<number>('sessionResetIntervalMinutes', 300),
       sessionTokenLimit: cfg.get<number>('sessionTokenLimit', 8_000_000),
