@@ -50,7 +50,9 @@ const child = spawn(cli, args, { detached: true, stdio: 'ignore' });
 
 child.on('error', (err) => {
   console.error(`\nCould not launch VS Code: ${err.message}`);
-  console.error("Install the CLI with Cmd+Shift+P -> \"Shell Command: Install 'code' command in PATH\",");
+  console.error(
+    'Install the CLI with Cmd+Shift+P -> "Shell Command: Install \'code\' command in PATH",'
+  );
   console.error('or set VSCODE_CLI to the full path of the code binary.');
   process.exit(1);
 });

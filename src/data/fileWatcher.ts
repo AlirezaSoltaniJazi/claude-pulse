@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { MODEL_WATCH_DEBOUNCE_MS, SETTINGS_POLL_INTERVAL_MS } from '../constants';
+import { MODEL_WATCH_DEBOUNCE_MS, WATCH_POLL_INTERVAL_MS } from '../constants';
 
 type DebounceSlot = 'settingsDebounce' | 'transcriptDebounce';
 
@@ -21,7 +21,7 @@ export class FileWatcher implements vscode.Disposable {
   private transcriptWatcher: fs.FSWatcher | null = null;
 
   private pollingInterval: ReturnType<typeof setInterval> | null = null;
-  private settingsPollInterval: ReturnType<typeof setInterval> | null = null;
+  private watchPollInterval: ReturnType<typeof setInterval> | null = null;
 
   private settingsDebounce: ReturnType<typeof setTimeout> | null = null;
   private transcriptDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -38,14 +38,14 @@ export class FileWatcher implements vscode.Disposable {
     private pollingIntervalMs: number = 30000,
     // Injectable so tests can drive the poll path deterministically instead of waiting on
     // FSEvents, whose delivery latency is not something a test should depend on.
-    private settingsPollIntervalMs: number = SETTINGS_POLL_INTERVAL_MS
+    private watchPollIntervalMs: number = WATCH_POLL_INTERVAL_MS
   ) {}
 
   start(): void {
     this.watchSessions();
     this.watchClaudeHome();
     this.startPolling();
-    this.startSettingsPolling();
+    this.startWatchPolling();
   }
 
   updatePollingInterval(ms: number): void {
@@ -54,6 +54,39 @@ export class FileWatcher implements vscode.Disposable {
       clearInterval(this.pollingInterval);
       this.startPolling();
     }
+  }
+
+  /**
+   * Re-points every watcher at a new `claudePulse.claudeHomePath`.
+   *
+   * Without this the sessions watch, the home-directory watch, the stats poll and the settings
+   * poll all stay bound to the path captured at construction, so after the setting changes the
+   * extension reads the new location but only ever reacts to events from the old one.
+   *
+   * No-op when the path is unchanged, so the caller can invoke it on every config change.
+   */
+  updateClaudeHomePath(claudeHomePath: string): void {
+    if (claudeHomePath === this.claudeHomePath) return;
+    this.claudeHomePath = claudeHomePath;
+
+    this.sessionWatcher?.close();
+    this.homeWatcher?.close();
+    this.sessionWatcher = null;
+    this.homeWatcher = null;
+
+    for (const timer of [this.pollingInterval, this.watchPollInterval]) {
+      if (timer) clearInterval(timer);
+    }
+    this.pollingInterval = null;
+    this.watchPollInterval = null;
+
+    // Baselines describe files under the OLD root, so keeping them would suppress the first
+    // report from the new one. The transcript is re-targeted by the caller's next refresh.
+    this.lastStatsModified = 0;
+    this.lastSettingsModified = 0;
+    this.clearDebounce('settingsDebounce');
+
+    this.start();
   }
 
   /**
@@ -74,16 +107,33 @@ export class FileWatcher implements vscode.Disposable {
     this.clearDebounce('transcriptDebounce');
 
     this.transcriptPath = transcriptPath;
+    // Adopt the file's current state as the baseline rather than resetting to "never seen".
+    // Arming is not itself news, and the poll below would otherwise report every re-target as
+    // a change. A file that is missing keeps the 0/-1 baseline, so its later appearance IS
+    // reported — that is the brand-new-session case, and it is genuinely news.
     this.lastTranscriptModified = 0;
     this.lastTranscriptSize = -1;
     if (!transcriptPath) return;
+    this.primeTranscript(transcriptPath);
 
     try {
-      // A file-level watch is safe here and only here: transcripts are append-only and are
-      // never rewritten via temp+rename, so the inode this watcher holds stays the live file.
+      // Append-only files make a file-level watch the cheapest option, but never the only one:
+      // a rewrite or compaction replaces the inode and kills this watcher silently, so the
+      // poll in startWatchPolling() is what actually guarantees delivery.
       this.transcriptWatcher = fs.watch(transcriptPath, () => void this.checkTranscript());
     } catch (_e) {
-      // Transcript not created yet — the next refresh re-arms it
+      // Transcript not created yet — the poll picks it up, and the next refresh re-arms
+    }
+  }
+
+  /** Synchronous on purpose: the baseline must be in place before the watch can fire. */
+  private primeTranscript(transcriptPath: string): void {
+    try {
+      const stat = fs.statSync(transcriptPath);
+      this.lastTranscriptModified = stat.mtimeMs;
+      this.lastTranscriptSize = stat.size;
+    } catch (_e) {
+      // Missing transcript — leave the 0/-1 baseline so its creation is reported
     }
   }
 
@@ -137,12 +187,17 @@ export class FileWatcher implements vscode.Disposable {
   /**
    * Dual strategy, matching the stats-cache rule: an FSWatch is never trusted on its own for a
    * file whose write style is an upstream implementation detail, and FSEvents can be dropped.
+   *
+   * Covers the transcript as well as settings.json. The transcript watch is file-level, so it
+   * goes permanently dead if the inode is ever replaced — and unlike settings.json, nothing
+   * else re-reads it on a timer, so a dead watch would freeze the model indefinitely. Both
+   * checks are one `stat` guarded by mtime+size, so sharing a single tick costs nothing.
    */
-  private startSettingsPolling(): void {
-    this.settingsPollInterval = setInterval(
-      () => void this.checkSettings(),
-      this.settingsPollIntervalMs
-    );
+  private startWatchPolling(): void {
+    this.watchPollInterval = setInterval(() => {
+      void this.checkSettings();
+      void this.checkTranscript();
+    }, this.watchPollIntervalMs);
   }
 
   /** The sole gate for the settings event — both the directory watch and the poll funnel here. */
@@ -202,11 +257,11 @@ export class FileWatcher implements vscode.Disposable {
     this.homeWatcher = null;
     this.transcriptWatcher = null;
 
-    for (const timer of [this.pollingInterval, this.settingsPollInterval]) {
+    for (const timer of [this.pollingInterval, this.watchPollInterval]) {
       if (timer) clearInterval(timer);
     }
     this.pollingInterval = null;
-    this.settingsPollInterval = null;
+    this.watchPollInterval = null;
 
     // Cleared BEFORE the emitters go, so a pending timer can never fire into a disposed one.
     this.clearDebounce('settingsDebounce');

@@ -144,14 +144,19 @@
     "watch": "node esbuild.js --watch",
     "dev": "npm run build && node scripts/launch-dev.js",
     "launch": "node scripts/launch-dev.js",
-    "lint": "eslint src",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "lint": "eslint src scripts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{js,mjs}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{js,mjs}\"",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
     "test:coverage": "node --experimental-vm-modules node_modules/.bin/vitest run --coverage",
     "prepare": "husky",
     "audit:security": "npm audit --omit=dev --audit-level=critical",
-    "release": "npm run lint && npm run format:check && npm test && npm run build && vsce package && vsce publish"
+    "package": "npm run build && vsce package --no-update-package-json",
+    "bump:patch": "node scripts/bump-version.mjs patch",
+    "bump:minor": "node scripts/bump-version.mjs minor",
+    "bump:major": "node scripts/bump-version.mjs major",
+    "release": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run package"
   },
   "lint-staged": {
     "src/**/*.ts": [
@@ -159,6 +164,10 @@
       "prettier --write"
     ],
     "test/**/*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "scripts/**/*.{js,mjs}": [
       "eslint --fix",
       "prettier --write"
     ]

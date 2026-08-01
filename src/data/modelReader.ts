@@ -423,8 +423,13 @@ async function scanTranscriptTail(
   const handle = await fs.promises.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, offset);
-    const lines = buffer.toString('utf-8').split('\n');
+    // `size` came from a stat that may already be stale: a rewrite or compaction can shrink
+    // the file before this read lands, leaving the tail of the buffer as NUL padding. Decoding
+    // that padding produces lines that silently fail JSON.parse, which reads as "no evidence"
+    // at exactly the moment the fallback matters most. Trust bytesRead, not the stat.
+    const { bytesRead } = await handle.read(buffer, 0, length, offset);
+    if (bytesRead <= 0) return empty;
+    const lines = buffer.subarray(0, bytesRead).toString('utf-8').split('\n');
 
     // A non-zero offset almost certainly slices the first line mid-record. When the
     // offset is 0 every line is whole, so dropping one would lose a single-line file.

@@ -54,10 +54,13 @@ export const MODEL_EFFORT_SEPARATOR = ' \u00B7 ';
  */
 export const MODEL_WATCH_DEBOUNCE_MS = 250;
 /**
- * Dual-strategy fallback for settings.json — an FSWatch alone is never trusted, because the
- * file's write style (in-place vs temp+rename) is an upstream implementation detail.
+ * Dual-strategy fallback for BOTH settings.json and the active transcript — an FSWatch is
+ * never trusted on its own. For settings.json the write style (in-place vs temp+rename) is an
+ * upstream implementation detail; for the transcript the watch is file-level, so it dies
+ * permanently the moment the inode is replaced by a rewrite or compaction. FSEvents can also
+ * be dropped outright on network and cloud-synced home directories.
  */
-export const SETTINGS_POLL_INTERVAL_MS = 2_000;
+export const WATCH_POLL_INTERVAL_MS = 2_000;
 
 // Session Monitor
 export const LIVENESS_CHECK_INTERVAL_MS = 10_000;

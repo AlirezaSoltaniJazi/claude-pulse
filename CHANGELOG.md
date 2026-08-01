@@ -61,9 +61,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Added `"types": ["node", "vscode"]` to `tsconfig.json`. Not caught by CI, which builds with esbuild only.
 - **CI matrix** — the Node 18 leg could no longer install, since vitest 4 and eslint 10 require
   Node `^20.19 || ^22.13 || >=24`. Matrix moved to Node 20 and 22, and `fail-fast: false` added so legs report
-  independently rather than being cancelled.
+  independently rather than being cancelled. Because CI can therefore no longer exercise the runtime of the
+  oldest supported editor (`engines.vscode` `^1.85.0` ships Electron 25 / Node 18), the esbuild `target` is now
+  pinned to `node18` — the bundle is made downlevel-safe at build time rather than by a test matrix.
+- **Packaged extension contained development files** — `.vscodeignore` did not exclude `scripts/`, `*.vsix`,
+  `.DS_Store` or the `.vscode-dev/` profile that `npm run dev` creates (a full VS Code user-data-dir plus
+  extensions dir, routinely hundreds of MB). `.gitignore` covered `.vscode-dev/`, but **vsce reads
+  `.vscodeignore` and never falls back to `.gitignore` when it exists**, so those entries had no effect on the
+  package. A stray `old_pub.md` was shipping in the published `.vsix` as a result. The package is now exactly
+  the manifest, README, LICENSE, CHANGELOG, `media/`, `dist/extension.js` and `node-notifier`.
+- **Model and effort could freeze for the rest of a session** — the transcript watch was a bare file-level
+  `fs.watch` with no polling fallback, contrary to the rule applied to `stats-cache.json` and `settings.json`.
+  A rewrite or compaction that replaces the inode kills that watch silently, and because `watchTranscript()` is
+  idempotent by path it would never re-arm. Nothing else re-reads the transcript on a timer — `refreshData()` is
+  purely event-driven — so the status bar would keep showing a stale model indefinitely. The transcript now
+  shares the 2s mtime+size poll with `settings.json`, and arming adopts the file's current state as its baseline
+  so a re-target is no longer misreported as a change.
+- **Watchers ignored `claudePulse.claudeHomePath` changes** — the path was captured at construction, so after
+  the setting changed the extension read the new location but only ever reacted to events from the old one, while
+  continuing to serve the old root's cached model and weekly scan. `FileWatcher.updateClaudeHomePath()` now
+  re-points every watcher and poll, and the config handler clears the scan and model caches and forces a refresh.
+- **Model info could revert to a stale value** — `refreshData()` and the transcript-driven `refreshModelInfo()`
+  both write `cachedData.modelInfo`, and the former resolves it alongside a weekly scan that can take seconds.
+  An append landing inside that window was overwritten by the older read. Both writers now claim a sequence
+  token and discard their own result if superseded.
+- **Transcript tail read trusted a stale `stat`** — `bytesRead` was discarded, so a file that shrank between the
+  `stat` and the read left NUL padding in the buffer; those lines failed `JSON.parse` and were skipped, degrading
+  to "no evidence" during exactly the rewrite the fallback exists for.
+- **Task-completion notifications reported the wrong directory** — the cwd was decoded back out of the project
+  directory name, but that encoding maps both `/` and `.` to `-` and cannot be inverted:
+  `-Users-me-projects-claude-pulse` decoded to `/Users/me/projects/claude/pulse`. The cwd is now taken from the
+  session file, which carries it verbatim.
+- **GitHub Releases had no `.vsix` attached** — the release workflow ran `vsce publish`, which builds into a temp
+  directory, then attached `files: '*.vsix'`, which matched nothing. `softprops/action-gh-release` warns and
+  continues on an unmatched glob, so every release silently shipped without its artifact. The workflow now runs
+  `vsce package` explicitly, attaches that file with `fail_on_unmatched_files: true`, and publishes the same
+  artifact via `--packagePath` so the Marketplace and the GitHub Release are byte-identical.
+- The `~` marker in the status bar now binds to what it describes. An unconfirmed global `/model` selection
+  marks only the model, leaving a transcript-proven effort clean; a dead session still marks the whole segment.
 
 ### Changed
+
+- **Release process** — releases are now cut by labelling a PR `release:patch`, `release:minor` or
+  `release:major` and merging it, or by running the Release workflow manually (with a `current` option that
+  releases without bumping) — matching the pipeline already used by the sibling extension projects. The workflow
+  bumps `package.json` and `package-lock.json`, promotes the CHANGELOG's `[Unreleased]` section to a dated
+  heading with compare links, and takes the GitHub Release notes from that promoted section instead of a
+  generated commit list. Guards: merged-not-just-closed, non-fork, never Dependabot, a `release` concurrency
+  group, and a hard failure if the tag already exists. The full gate (`lint`, `format:check`, `typecheck`,
+  `build`, `test`) runs before anything is written. New `pr-version-check.yml` fails any PR whose version goes
+  backwards. New `scripts/bump-version.mjs` and `scripts/changelog.mjs`; new `typecheck`, `package` and
+  `bump:*` npm scripts. `npm run release` no longer publishes — it builds and packages locally, so publishing
+  has exactly one path.
+- `lint`, `format` and `format:check` now cover `scripts/` as well as `src/` and `test/`; ESLint gained flat
+  config blocks for CommonJS and ESM scripts. `scripts/launch-dev.js` was previously unchecked by either tool.
 
 - Bump `@types/node` from 25.9.3 to 26.1.2
 - Bump `@typescript-eslint/eslint-plugin` from 8.61.0 to 8.65.0

@@ -267,6 +267,107 @@ describe('FileWatcher', () => {
 
       expect(() => watcher!.watchTranscript(path.join(home, 'missing.jsonl'))).not.toThrow();
     });
+
+    it('does not report arming on an existing transcript as a change', async () => {
+      // The poll would otherwise treat every re-target as news, because arming resets the
+      // mtime/size baseline. Arming is not a change; only what happens afterwards is.
+      const transcript = writeTranscript('session-a', 3);
+      watcher = new FileWatcher(home, 60_000, POLL_MS);
+      const transcripts = counterFor((l) => watcher!.onTranscriptChanged(l));
+      watcher.start();
+
+      watcher.watchTranscript(transcript);
+
+      await sleep(SETTLE_MS * 2);
+      expect(transcripts.count).toBe(0);
+    });
+
+    it(
+      'reports an append after the transcript inode is replaced',
+      { timeout: 10_000 },
+      async () => {
+        // The file-level fs.watch dies permanently when a rewrite or compaction swaps the inode,
+        // and nothing else re-reads the transcript on a timer — so without the poll the model
+        // would freeze here for the rest of the session. Appends below reach the NEW inode,
+        // which the original watcher cannot see: only the poll can deliver them.
+        const transcript = writeTranscript('session-a');
+        watcher = new FileWatcher(home, 60_000, POLL_MS);
+        const transcripts = counterFor((l) => watcher!.onTranscriptChanged(l));
+        watcher.start();
+        watcher.watchTranscript(transcript);
+        await sleep(ARM_MS);
+
+        const temp = path.join(home, 'session-a.jsonl.tmp');
+        fs.writeFileSync(temp, '{"type":"user"}\n{"type":"user"}\n', 'utf-8');
+        fs.renameSync(temp, transcript);
+        await sleep(SETTLE_MS * 2);
+
+        const before = transcripts.count;
+        fs.appendFileSync(transcript, '{"type":"assistant"}\n', 'utf-8');
+
+        await waitUntil(() => transcripts.count > before);
+      }
+    );
+  });
+
+  describe('claudeHomePath changes', () => {
+    let otherHome: string;
+
+    beforeEach(() => {
+      otherHome = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-pulse-watcher-alt-'));
+      fs.mkdirSync(path.join(otherHome, 'sessions'), { recursive: true });
+    });
+
+    afterEach(() => {
+      fs.rmSync(otherHome, { recursive: true, force: true });
+    });
+
+    it('reports the settings file under the new root and abandons the old one', async () => {
+      const base = Date.now();
+      writeSettings('claude-opus-5', base);
+      fs.writeFileSync(
+        path.join(otherHome, 'settings.json'),
+        JSON.stringify({ model: 'claude-fable-5[1m]' }),
+        'utf-8'
+      );
+      watcher = new FileWatcher(home, 60_000, POLL_MS);
+      const settings = counterFor((l) => watcher!.onModelSettingsChanged(l));
+      await startAndDrain(settings);
+
+      const afterStart = settings.count;
+      watcher.updateClaudeHomePath(otherHome);
+      // Mirrors start(): the new root's settings file is reported rather than silently adopted.
+      await waitUntil(() => settings.count > afterStart);
+      await sleep(SETTLE_MS);
+
+      // The old root must be fully abandoned — nothing it does can reach us any more.
+      const afterSwitch = settings.count;
+      writeSettings('claude-sonnet-5', base + 10_000);
+      await sleep(SETTLE_MS * 2);
+      expect(settings.count).toBe(afterSwitch);
+
+      // ...while the new root is live.
+      const otherSettings = path.join(otherHome, 'settings.json');
+      fs.writeFileSync(otherSettings, JSON.stringify({ model: 'claude-opus-5' }), 'utf-8');
+      fs.utimesSync(otherSettings, new Date(base + 20_000), new Date(base + 20_000));
+      await waitUntil(() => settings.count > afterSwitch);
+    });
+
+    it('is a no-op when the path is unchanged', async () => {
+      const base = Date.now();
+      writeSettings('claude-opus-5', base);
+      watcher = new FileWatcher(home, 60_000, POLL_MS);
+      const settings = counterFor((l) => watcher!.onModelSettingsChanged(l));
+      await startAndDrain(settings);
+
+      const before = settings.count;
+      watcher.updateClaudeHomePath(home);
+
+      // A re-report here would mean the baseline was reset, and every config save — of any
+      // setting — would redundantly re-resolve the model.
+      await sleep(SETTLE_MS * 2);
+      expect(settings.count).toBe(before);
+    });
   });
 
   describe('dispose', () => {

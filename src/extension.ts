@@ -85,11 +85,25 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // Wire config changes
+  let watchedHomePath = config.claudeHomePath;
   configManager.onConfigChanged((newConfig) => {
     fileWatcher.updatePollingInterval(newConfig.pollingIntervalSeconds * 1000);
     startUsageRefreshInterval(newConfig.usageRefreshIntervalSeconds);
     taskCompletionDetector.updateIdleThreshold(newConfig.taskCompletionIdleSeconds);
     notificationManager.updateConfig(newConfig);
+
+    // Every cache and watcher is keyed to the old root, so a path change invalidates all of
+    // them. Without this the extension reads the new location but only reacts to events from
+    // the old one, and keeps serving the old root's cached model and weekly scan.
+    if (newConfig.claudeHomePath !== watchedHomePath) {
+      watchedHomePath = newConfig.claudeHomePath;
+      fileWatcher.updateClaudeHomePath(newConfig.claudeHomePath);
+      clearScanCache();
+      clearModelCache();
+      void refreshData(false);
+      return;
+    }
+
     updateUI();
   });
 
@@ -196,6 +210,16 @@ function pickPrimarySession(
   );
 }
 
+/**
+ * Guards `cachedData.modelInfo` against lost updates.
+ *
+ * Two independent async writers race for this one field: `refreshData()`, which resolves it
+ * alongside a full weekly scan, and `refreshModelInfo()`, which rides transcript appends and
+ * finishes in milliseconds. Whoever claims the newest token wins; a slower writer that started
+ * earlier discards its own result rather than overwriting fresher data with stale data.
+ */
+let modelInfoSeq = 0;
+
 async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   const config = configManager.getConfig();
 
@@ -211,10 +235,14 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   const primarySession = pickPrimarySession(activeSessions, mostRecentSession);
 
   // Reads that depend on the resolved session, run in parallel with the weekly scan.
-  const [weeklyUsage, modelInfo] = await Promise.all([
+  const modelToken = ++modelInfoSeq;
+  const [weeklyUsage, freshModelInfo] = await Promise.all([
     scanWeeklyUsage(config.claudeHomePath),
     readModelInfo(config.claudeHomePath, primarySession, activeSessions.length > 0),
   ]);
+  // The weekly scan can take seconds; a transcript append landing inside that window produces
+  // a newer read than this one, so keep it rather than reverting the status bar.
+  const modelInfo = modelToken === modelInfoSeq ? freshModelInfo : cachedData.modelInfo;
 
   // Only use API data for usage — local file data is stale and unreliable.
   const usage = cachedData.usage;
@@ -267,13 +295,18 @@ async function refreshModelInfo(): Promise<void> {
     cachedData.mostRecentSession
   );
 
+  const modelToken = ++modelInfoSeq;
   const modelInfo = await readModelInfo(
     config.claudeHomePath,
     primarySession,
     cachedData.activeSessions.length > 0
   );
 
-  cachedData = { ...cachedData, modelInfo };
+  // Superseded while this read was in flight — the newer writer owns the field now. Still
+  // re-target the watch: it is idempotent, and the primary session may have moved.
+  if (modelToken === modelInfoSeq) {
+    cachedData = { ...cachedData, modelInfo };
+  }
   await retargetTranscriptWatch(config.claudeHomePath, primarySession);
   updateUI();
 }

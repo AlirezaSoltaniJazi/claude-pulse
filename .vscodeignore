@@ -6,6 +6,7 @@ node_modules/**
 !node_modules/node-notifier/**
 .gitignore
 .eslintrc.json
+eslint.config.mjs
 .prettierrc
 .prettierignore
 tsconfig.json
@@ -30,3 +31,16 @@ package-lock.json
 PUBLISHING.md
 INJECT.md
 agents.md
+
+# Dev tooling. `npm run dev` creates .vscode-dev/ as a throwaway VS Code profile
+# (a full user-data-dir plus an extensions dir — routinely hundreds of MB). It is
+# in .gitignore, but vsce reads THIS file and never falls back to .gitignore when
+# it exists, so it has to be repeated here or it ships inside the .vsix.
+.vscode-dev/**
+scripts/**
+
+# Local scratch and build output that would otherwise be packaged verbatim.
+old_pub.md
+*.vsix
+.DS_Store
+**/.DS_Store
