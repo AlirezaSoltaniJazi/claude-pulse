@@ -1,29 +1,176 @@
 name: Release
 
+# Two ways to cut a release:
+#   1. Label a PR `release:patch|minor|major` and merge it — the label picks the
+#      bump; on merge this workflow bumps the version, promotes the CHANGELOG
+#      [Unreleased] section, tags, packages the .vsix and publishes it.
+#   2. Run it manually (Actions → Release → Run workflow) and choose the bump
+#      (or `current` to release the current version without bumping).
+# In both cases the GitHub Release notes come from the promoted CHANGELOG section.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump ("current" releases the current version without bumping)'
+        required: true
+        default: current
+        type: choice
+        options:
+          - current
+          - patch
+          - minor
+          - major
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Run on a manual dispatch, or on a merged (not just closed) non-fork PR that
+    # carries a release:* label. Dependabot PRs never trigger a release.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.fork == false &&
+       github.event.pull_request.user.login != 'dependabot[bot]' &&
+       (contains(github.event.pull_request.labels.*.name, 'release:patch') ||
+        contains(github.event.pull_request.labels.*.name, 'release:minor') ||
+        contains(github.event.pull_request.labels.*.name, 'release:major')))
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      # On a pull_request event github.ref is the merge ref, so resolve the real
+      # branch the bump commit + tag should land on.
+      TARGET_BRANCH: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.ref || github.ref_name }}
+          fetch-depth: 0
+          # Default GITHUB_TOKEN works for pushing back; it intentionally does
+          # not trigger other workflows, so we won't recurse into this one.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
+
+      - name: Configure git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Resolve release parameters
+        id: params
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_BUMP: ${{ github.event.inputs.bump }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            BUMP="$DISPATCH_BUMP"
+          elif echo "$PR_LABELS" | grep -q 'release:major'; then
+            BUMP=major
+          elif echo "$PR_LABELS" | grep -q 'release:minor'; then
+            BUMP=minor
+          else
+            BUMP=patch
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Resolved bump: $BUMP"
+
       - run: npm ci
       - run: npm run lint
-      - run: npm test
+      - run: npm run format:check
+      - run: npm run typecheck
       - run: npm run build
-      - name: Publish to VS Code Marketplace
-        run: npx @vscode/vsce publish --no-update-package-json
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      - name: Create GitHub Release
+      - run: npm test
+
+      - name: Bump version and promote changelog
+        id: bump
+        run: |
+          set -euo pipefail
+          version=$(node scripts/bump-version.mjs ${{ steps.params.outputs.bump }})
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+
+      # Package explicitly. `vsce publish` builds into a temp dir, so without this
+      # step there is no .vsix in the working directory to attach to the release —
+      # which is why every release before this one shipped with no asset.
+      - name: Package extension
+        run: npx @vscode/vsce package --no-update-package-json
+
+      - name: Extract release notes from changelog
+        id: notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.bump.outputs.version }}"
+          NOTES="$RUNNER_TEMP/release-notes.md"
+          # Print the body of the "## [VERSION]" section, up to the next "## [".
+          awk -v ver="$VERSION" '
+            BEGIN { gsub(/\./, "\\.", ver) }
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > "$NOTES"
+          if [ -s "$NOTES" ]; then
+            echo "notes_file=$NOTES" >> "$GITHUB_OUTPUT"
+          else
+            echo "No CHANGELOG section for $VERSION — falling back to generated notes."
+          fi
+
+      - name: Commit, tag and push
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.version }}"
+          git add package.json package-lock.json CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "Nothing to commit (version + changelog unchanged)."
+          else
+            git commit -m "chore: release v$version"
+            git push origin "HEAD:${{ env.TARGET_BRANCH }}"
+          fi
+          if git rev-parse "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "::error::Tag v$version already exists — bump the version or delete the tag."
+            exit 1
+          fi
+          git tag -a "v$version" -m "Release v$version"
+          git push origin "v$version"
+
+      - name: GitHub Release (notes from changelog)
+        if: steps.notes.outputs.notes_file != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
+          body_path: ${{ steps.notes.outputs.notes_file }}
+          files: '*.vsix'
+          fail_on_unmatched_files: true
+
+      - name: GitHub Release (generated notes fallback)
+        if: steps.notes.outputs.notes_file == ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
           generate_release_notes: true
           files: '*.vsix'
+          fail_on_unmatched_files: true
+
+      # Publishes the .vsix built above rather than rebuilding, so the artifact on
+      # the GitHub Release is byte-identical to the one on the Marketplace.
+      - name: Publish to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          npx @vscode/vsce publish \
+            --packagePath "claude-pulse-monitor-${{ steps.bump.outputs.version }}.vsix"

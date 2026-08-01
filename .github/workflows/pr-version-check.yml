@@ -1,0 +1,62 @@
+name: PR - Version Check
+
+# Guards against accidental version downgrades: fails a PR whose package.json
+# version is LOWER than the base branch. Equal is allowed (the Release workflow
+# bumps at release time); higher is allowed (a deliberate in-PR bump).
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Version must not go backwards
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          HEAD_PKG=$(node -p "require('./package.json').version")
+
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          git show "FETCH_HEAD:package.json" > "$RUNNER_TEMP/base-package.json"
+          BASE_PKG=$(node -p "require('$RUNNER_TEMP/base-package.json').version")
+
+          cat > "$RUNNER_TEMP/vercheck.mjs" <<'EOF'
+          const [base, head] = process.argv.slice(2);
+          const semverRe = /^\d+\.\d+\.\d+$/;
+          for (const [name, v] of [
+            ['base package.json', base],
+            ['PR package.json', head],
+          ]) {
+            if (!semverRe.test(v)) {
+              console.error(`::error::${name} version "${v}" is not MAJOR.MINOR.PATCH.`);
+              process.exit(1);
+            }
+          }
+          const cmp = (a, b) => {
+            const pa = a.split('.').map(Number);
+            const pb = b.split('.').map(Number);
+            for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i];
+            return 0;
+          };
+          const c = cmp(head, base);
+          if (c < 0) {
+            console.error(`::error::PR version (${head}) is LESS than base (${base}). Version cannot go backwards — bump it or rebase.`);
+            process.exit(1);
+          }
+          console.log(
+            c === 0
+              ? `PR version = base (${head}); the Release workflow bumps at release time.`
+              : `PR bumps version ${base} -> ${head}.`
+          );
+          EOF
+          node "$RUNNER_TEMP/vercheck.mjs" "$BASE_PKG" "$HEAD_PKG"

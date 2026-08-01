@@ -36,6 +36,12 @@ interface ApiResult {
 
 let cache: UsageCache | null = null;
 let outputChannel: vscode.OutputChannel | null = null;
+/**
+ * Deduplicates concurrent callers onto one request. With several windows and an opportunistic
+ * refresh riding task completion, simultaneous fetches are routine — and every duplicate is a
+ * free step towards the rate limit this module already has to handle.
+ */
+let inFlight: Promise<FetchUsageResult> | null = null;
 
 function log(msg: string): void {
   if (!outputChannel) {
@@ -55,6 +61,19 @@ export async function fetchUsage(forceRefresh: boolean = false): Promise<FetchUs
     return { data: cache.data, status: 'cached', message: 'Using cached data' };
   }
 
+  if (inFlight) return inFlight;
+
+  const request = doFetchUsage();
+  inFlight = request;
+  try {
+    return await request;
+  } finally {
+    // Identity-checked: clearUsageCache() may have already handed the slot to a newer request.
+    if (inFlight === request) inFlight = null;
+  }
+}
+
+async function doFetchUsage(): Promise<FetchUsageResult> {
   try {
     log('Fetching OAuth credentials...');
     const credentials = await getOAuthCredentials();
@@ -111,6 +130,7 @@ export async function fetchUsage(forceRefresh: boolean = false): Promise<FetchUs
 
 export function clearUsageCache(): void {
   cache = null;
+  inFlight = null;
 }
 
 async function getOAuthCredentials(): Promise<OAuthCredentials | null> {
@@ -216,10 +236,20 @@ async function callUsageApi(accessToken: string): Promise<CallResult> {
 
     // Rate limited — respect retry-after, with a minimum backoff
     if (result.status === 429) {
+      // Nothing left to wait for on the final attempt.
+      if (attempt >= MAX_RETRIES - 1) break;
+
       const retryAfter =
         result.retryAfterMs && result.retryAfterMs > 0
           ? result.retryAfterMs
           : Math.min(Math.pow(2, attempt) * 2000 + MIN_BACKOFF_429_MS, MAX_BACKOFF_MS);
+      // A server-supplied Retry-After can be minutes. Holding a timer (and the in-flight
+      // dedupe) open that long is worse than returning cached data and letting the
+      // scheduled refresh try again.
+      if (retryAfter > MAX_BACKOFF_MS) {
+        log(`Rate limited with Retry-After ${retryAfter}ms — abandoning retries`);
+        break;
+      }
       log(`Rate limited, waiting ${retryAfter}ms...`);
       await sleep(retryAfter);
       continue;

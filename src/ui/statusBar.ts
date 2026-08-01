@@ -1,8 +1,18 @@
 import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
-import { ClaudeUsage, DailyActivity, SessionFile } from '../types';
-import { formatDuration, formatNumber } from '../utils/formatting';
-import { USAGE_TIER_HIGH, USAGE_TIER_CRITICAL, STATUS_BAR_TICK_MS } from '../constants';
+import { ClaudeUsage, DailyActivity, ModelInfo, SessionFile } from '../types';
+import {
+  formatDuration,
+  formatEffortLevel,
+  formatModelName,
+  formatNumber,
+} from '../utils/formatting';
+import {
+  USAGE_TIER_HIGH,
+  USAGE_TIER_CRITICAL,
+  STATUS_BAR_TICK_MS,
+  MODEL_EFFORT_SEPARATOR,
+} from '../constants';
 
 export class StatusBar implements vscode.Disposable {
   private statusBarItem: vscode.StatusBarItem;
@@ -12,6 +22,7 @@ export class StatusBar implements vscode.Disposable {
   private todayActivity: DailyActivity | null = null;
   private config: ClaudePulseConfig | null = null;
   private usage: ClaudeUsage | null = null;
+  private modelInfo: ModelInfo | null = null;
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -25,12 +36,14 @@ export class StatusBar implements vscode.Disposable {
     config: ClaudePulseConfig,
     activeSession: SessionFile | null,
     todayActivity: DailyActivity | null,
-    usage: ClaudeUsage | null
+    usage: ClaudeUsage | null,
+    modelInfo: ModelInfo | null
   ): void {
     this.config = config;
     this.currentSession = activeSession;
     this.todayActivity = todayActivity;
     this.usage = usage;
+    this.modelInfo = modelInfo;
     this.render();
   }
 
@@ -144,6 +157,46 @@ export class StatusBar implements vscode.Disposable {
     if (this.config.statusBar.showSessionCount && this.todayActivity) {
       parts.push(`${this.todayActivity.sessionCount}s`);
       tooltipParts.push(`Today: ${this.todayActivity.sessionCount} sessions`);
+    }
+
+    // Model + effort level — one combined segment, rendered last so the color-coded
+    // usage percentage keeps the leftmost slot and existing segments never shift.
+    if (this.modelInfo) {
+      const modelLabel = this.config.statusBar.showModel
+        ? formatModelName(this.modelInfo.model)
+        : '';
+      const effortLabel = this.config.statusBar.showEffort
+        ? formatEffortLevel(this.modelInfo.effort)
+        : '';
+      // '~' marks a non-authoritative value, matching the estimated-timer convention. It binds
+      // to whatever it actually describes: an unconfirmed global /model selection taints only
+      // the model, so the effort — which the transcript may well have proven — is left clean.
+      // A dead session taints everything, because nothing shown is current.
+      const optimisticModel = this.modelInfo.modelSource === 'settings' ? '~' : '';
+      const segment = [modelLabel ? `${optimisticModel}${modelLabel}` : '', effortLabel]
+        .filter((s) => s.length > 0)
+        .join(MODEL_EFFORT_SEPARATOR);
+
+      if (segment.length > 0) {
+        const prefix = this.modelInfo.isSessionLive ? '' : '~';
+        parts.push(`$(sparkle) ${prefix}${segment}`);
+
+        // Tooltip carries the raw id — the bar shows the pretty label.
+        if (modelLabel.length > 0 && this.modelInfo.model) {
+          tooltipParts.push(
+            this.modelInfo.modelSource === 'settings'
+              ? `Model: ${this.modelInfo.model} (latest /model selection, unconfirmed)`
+              : `Model: ${this.modelInfo.model}`
+          );
+        }
+        if (effortLabel.length > 0 && this.modelInfo.effort) {
+          tooltipParts.push(
+            this.modelInfo.effortSource === 'settings'
+              ? `Effort: ${this.modelInfo.effort} (global setting)`
+              : `Effort: ${this.modelInfo.effort}`
+          );
+        }
+      }
     }
 
     this.statusBarItem.text = parts.join(' ');

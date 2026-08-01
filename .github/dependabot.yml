@@ -11,3 +11,9 @@ updates:
     labels:
       - 'dependencies'
       - 'security'
+    ignore:
+      # Must be raised deliberately and in lockstep with engines.vscode.
+      # vsce throws at package time when @types/vscode exceeds engines.vscode,
+      # and nothing in CI runs `vsce package`, so an automated bump here
+      # silently breaks `npm run release`.
+      - dependency-name: '@types/vscode'

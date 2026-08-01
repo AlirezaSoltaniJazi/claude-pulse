@@ -5,6 +5,43 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Model and effort level in the status bar** — see which model you are on and its reasoning effort at a glance,
+  e.g. `Opus 5 · xhigh`. Hide either half with the new `claudePulse.statusBar.showModel` and
+  `claudePulse.statusBar.showEffort` settings.
+- **Each window now follows its own project.** If you run Claude in several projects at once, every window shows
+  that project's session — its model and its reset timer — instead of whichever session was found first.
+- **`/model` shows up immediately**, in about a quarter of a second, rather than after the next refresh.
+- **Usage updates when a task finishes**, not only once an hour, so the percentage is current when you look at it.
+- **"API data refreshed" pop-ups can be turned off** with `claudePulse.notifications.onApiRefresh`. Errors and
+  warnings are always shown.
+
+### Security
+
+- Cleared 8 advisories in build-time dependencies. Nothing shipped inside the extension was ever affected.
+
+### Fixed
+
+- **The model name vanished from the status bar while Claude was working**, leaving just the effort level. Most
+  visible if you use `/model default`, which had nothing to fall back on to hide it.
+- **The model and effort could stay stuck on an old value** for the rest of a session.
+- **The status bar could briefly flip back to an out-of-date model** after a refresh.
+- **Changing `claudePulse.claudeHomePath` did nothing** until the window was reloaded.
+- **Task-completion notifications showed a broken project path** when the folder name contained a hyphen —
+  `claude-pulse` was reported as `claude/pulse`.
+- **The published extension included development files** that should never have shipped.
+- **GitHub Releases were published without the `.vsix` file attached.**
+- The `~` "not confirmed yet" marker now applies only to the value it actually describes.
+
+### Changed
+
+- Releases are now cut by labelling a pull request `release:patch`, `release:minor` or `release:major` and
+  merging it. Release notes come from this changelog.
+- Updated development dependencies and build tooling. VS Code 1.85 and above is still supported.
+
 ## [0.2.7] - 2026-04-04
 
 ### Added
