@@ -88,6 +88,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transcript tail read trusted a stale `stat`** — `bytesRead` was discarded, so a file that shrank between the
   `stat` and the read left NUL padding in the buffer; those lines failed `JSON.parse` and were skipped, degrading
   to "no evidence" during exactly the rewrite the fallback exists for.
+- **The model disappeared from the status bar while Claude was working** — the transcript read used a fixed
+  256 KB widening ceiling, but a single tool-result line is routinely far larger: across the 113 local
+  transcripts over 200 KB, the largest single line measures **846 KB**. Mid-turn that line sits *after* the last
+  assistant record, pushing it out of every window, so the model resolved to `null` for the duration of the turn
+  — precisely when the status bar is being watched. Two changes fix it: the cold read now widens through
+  64 KB → 256 KB → 1 MB → 4 MB, and subsequent reads are **incremental** — only the bytes appended since the last
+  scan are examined, and evidence already proven is retained, since an append cannot invalidate an earlier
+  record. That also makes the common path cheaper: cost is proportional to the bytes added rather than to the
+  size of the transcript, which matters at the 32 MB transcripts present locally.
+  The reason this surfaced as *"the model only disappears in `default` mode"* is that `settings.json` was
+  masking it. An explicit selection such as `"model": "opus[1m]"` gives `resolveModelSelection` a fallback, so
+  the bar still showed `Opus`; `/model default` writes the literal `"default"`, which names no model and is
+  correctly rejected, leaving the transcript as the only source — and it was failing. Effort survived either way
+  because it falls back to the global `effortLevel`, which is why the segment rendered as a bare `xhigh`.
+  The read cursor now also stops at the last **complete** line, so a record caught mid-write is re-read whole on
+  the next pass instead of being consumed as garbage and skipped permanently.
 - **Task-completion notifications reported the wrong directory** — the cwd was decoded back out of the project
   directory name, but that encoding maps both `/` and `.` to `-` and cannot be inverted:
   `-Users-me-projects-claude-pulse` decoded to `/Users/me/projects/claude/pulse`. The cwd is now taken from the

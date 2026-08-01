@@ -25,10 +25,26 @@ export const SCAN_CACHE_TTL_MS = 60_000;
 // Model Reader
 /** Deliberately below the default 30s poll so a scheduled refresh is never served stale data. */
 export const MODEL_INFO_CACHE_TTL_MS = 10_000;
-/** Tail window for the transcript read — covers >99% of real files' last assistant record. */
+/** Tail window for the transcript read — covers the last assistant record of a settled turn. */
 export const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
-/** One widening step. Never read the whole file: transcripts reach many megabytes. */
-export const TRANSCRIPT_TAIL_MAX_BYTES = 256 * 1024;
+/**
+ * Widening ladder for a cold read, tried in order until an assistant record turns up.
+ *
+ * A single tool-result line is routinely enormous: measured across the 113 local transcripts
+ * over 200 KB, the largest single line is 846 KB. Mid-turn, such a line sits AFTER the last
+ * assistant record, so any ceiling below it makes the model vanish from the status bar for the
+ * duration of the turn — precisely when the user is watching. 4 MB clears the observed maximum
+ * with room to spare, and the ladder means the common case still costs one 64 KB read.
+ *
+ * The ceiling is not the real protection against cost: the incremental append-only scan is.
+ * This ladder only runs on a cold read or after a rewrite.
+ */
+export const TRANSCRIPT_TAIL_WINDOWS = [
+  TRANSCRIPT_TAIL_BYTES,
+  256 * 1024,
+  1024 * 1024,
+  4 * 1024 * 1024,
+];
 /** Assistant records carrying this model id are injected interrupt/API-error placeholders. */
 export const SYNTHETIC_MODEL_ID = '<synthetic>';
 /**

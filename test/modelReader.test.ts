@@ -12,7 +12,7 @@ import {
   resolveTranscriptPath,
 } from '../src/data/modelReader';
 import { SessionFile } from '../src/types';
-import { TRANSCRIPT_TAIL_BYTES, TRANSCRIPT_TAIL_MAX_BYTES } from '../src/constants';
+import { TRANSCRIPT_TAIL_BYTES } from '../src/constants';
 
 const SESSION_ID = '6262ea69-f0c0-43c1-9bb2-000ffef8dd6c';
 
@@ -96,6 +96,16 @@ function writeTranscript(session: SessionFile, lines: string[], dirName?: string
   const filePath = path.join(projectDir, `${session.sessionId}.jsonl`);
   fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf-8');
   return filePath;
+}
+
+/**
+ * Advances the transcript mtime the way a real append does. Size alone would invalidate the
+ * evidence cache, but a rewrite can leave the size unchanged, so mtime has to move too.
+ */
+let touchCounter = 0;
+function touchTranscript(filePath: string): void {
+  const at = new Date(Date.parse(TRANSCRIPT_AT) + ++touchCounter * 1000);
+  fs.utimesSync(filePath, at, at);
 }
 
 /**
@@ -369,36 +379,93 @@ describe('readModelInfo', () => {
     expect(result?.model).toBe('claude-opus-5');
   });
 
-  it('widens the read window once when the tail holds no assistant record', async () => {
+  it('widens the read window when the tail holds no assistant record', async () => {
     const session = makeSession();
-    // ~86 KB of trailing user records pushes the assistant record out of the 64 KB
-    // window but keeps it inside the 256 KB widened window.
+    // ~86 KB of trailing user records pushes the assistant record out of the 64 KB window.
     const trailing = new Array(400).fill(JSON.stringify({ type: 'user', pad: 'x'.repeat(200) }));
     const filePath = writeTranscript(session, [
       assistantRecord('claude-opus-5', 'xhigh'),
       ...trailing,
     ]);
-    const size = fs.statSync(filePath).size;
-    expect(size).toBeGreaterThan(TRANSCRIPT_TAIL_BYTES);
-    expect(size).toBeLessThan(TRANSCRIPT_TAIL_MAX_BYTES);
+    expect(fs.statSync(filePath).size).toBeGreaterThan(TRANSCRIPT_TAIL_BYTES);
 
     const result = await readModelInfo(claudeHome, session, true);
 
     expect(result?.model).toBe('claude-opus-5');
   });
 
-  it('gives up rather than reading the whole file past the widening ceiling', async () => {
+  it('finds the model behind a single tool result larger than any small tail window', async () => {
+    // Not hypothetical: across the 113 local transcripts over 200 KB the largest single line
+    // is 846 KB. Mid-turn that line sits after the last assistant record, so a fixed 256 KB
+    // ceiling made the model vanish from the status bar for the whole turn.
     const session = makeSession();
-    // Beyond 256 KB of trailing records the assistant record is unreachable by design —
-    // the cost ceiling matters more than resolving a pathological transcript.
-    const trailing = new Array(1400).fill(JSON.stringify({ type: 'user', pad: 'x'.repeat(200) }));
+    const hugeToolResult = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', content: 'x'.repeat(900 * 1024) }],
+      },
+    });
+    writeTranscript(session, [assistantRecord('claude-opus-5', 'xhigh'), hugeToolResult]);
+
+    const result = await readModelInfo(claudeHome, session, true);
+
+    expect(result?.model).toBe('claude-opus-5');
+  });
+
+  it('keeps a resolved model when what follows it exceeds the widening ceiling', async () => {
+    // Deliberately past the top of TRANSCRIPT_TAIL_WINDOWS, so widening alone cannot reach
+    // back to the assistant record — only the incremental append-only scan can, by keeping
+    // what it already proved. Evidence does not stop being true because a large record landed
+    // after it, and this is what stops the model flickering off whenever Claude runs a
+    // command with a big output.
+    const session = makeSession();
+    const filePath = writeTranscript(session, [assistantRecord('claude-opus-5', 'xhigh')]);
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-opus-5');
+
+    const beyondCeiling = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', content: 'x'.repeat(5 * 1024 * 1024) }],
+      },
+    });
+    fs.appendFileSync(filePath, beyondCeiling + '\n', 'utf-8');
+    touchTranscript(filePath);
+
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-opus-5');
+  });
+
+  it('picks up a record that was only half-written at the previous read', async () => {
+    // The cursor stops at the last complete line, so the partial record is re-read whole
+    // rather than being consumed as garbage and skipped forever.
+    const session = makeSession();
+    const filePath = writeTranscript(session, [assistantRecord('claude-opus-5', 'xhigh')]);
+    fs.appendFileSync(filePath, '{"type":"assistant","message":{"model":"claude-fab', 'utf-8');
+    touchTranscript(filePath);
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-opus-5');
+
+    fs.appendFileSync(filePath, 'le-5"},"timestamp":"' + TRANSCRIPT_AT + '"}\n', 'utf-8');
+    touchTranscript(filePath);
+
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-fable-5');
+  });
+
+  it('re-scans from scratch when the transcript is rewritten smaller', async () => {
+    // A shrink means the append-only assumption is void, so the cursor and the evidence
+    // behind it must both be discarded rather than trusted.
+    const session = makeSession();
     const filePath = writeTranscript(session, [
       assistantRecord('claude-opus-5', 'xhigh'),
-      ...trailing,
+      userRecord(),
+      userRecord(),
     ]);
-    expect(fs.statSync(filePath).size).toBeGreaterThan(TRANSCRIPT_TAIL_MAX_BYTES);
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-opus-5');
 
-    expect(await readModelInfo(claudeHome, session, true)).toBeNull();
+    fs.writeFileSync(filePath, assistantRecord('claude-fable-5', 'high') + '\n', 'utf-8');
+    touchTranscript(filePath);
+
+    expect((await readModelInfo(claudeHome, session, true))?.model).toBe('claude-fable-5');
   });
 
   it('serves an unchanged transcript from cache without re-reading it', async () => {

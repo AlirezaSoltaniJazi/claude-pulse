@@ -6,8 +6,7 @@ import {
   MODEL_COMMAND_STDOUT_PATTERN,
   MODEL_INFO_CACHE_TTL_MS,
   SYNTHETIC_MODEL_ID,
-  TRANSCRIPT_TAIL_BYTES,
-  TRANSCRIPT_TAIL_MAX_BYTES,
+  TRANSCRIPT_TAIL_WINDOWS,
 } from '../constants';
 
 /** The last assistant turn of a session. Authoritative, but only lands once a turn completes. */
@@ -52,8 +51,19 @@ interface TranscriptEvidenceCache {
   transcriptPath: string;
   mtimeMs: number;
   size: number;
+  /**
+   * Byte offset just past the last COMPLETE line consumed. The next read resumes here, so a
+   * record still being written is never half-parsed and never skipped.
+   */
+  consumedUpTo: number;
   evidence: TranscriptEvidence;
   timestamp: number;
+}
+
+/** What one range scan produced, plus how far it got through complete lines. */
+interface ScanResult {
+  evidence: TranscriptEvidence;
+  consumedUpTo: number;
 }
 
 interface TranscriptPathCache {
@@ -376,10 +386,11 @@ async function readTranscriptEvidence(
   stat: fs.Stats
 ): Promise<TranscriptEvidence> {
   const cached = transcriptEvidenceCache;
+  const sameFile =
+    cached !== null && cached.sessionId === sessionId && cached.transcriptPath === transcriptPath;
+
   if (
-    cached &&
-    cached.sessionId === sessionId &&
-    cached.transcriptPath === transcriptPath &&
+    sameFile &&
     cached.mtimeMs === stat.mtimeMs &&
     cached.size === stat.size &&
     Date.now() - cached.timestamp < MODEL_INFO_CACHE_TTL_MS
@@ -387,53 +398,107 @@ async function readTranscriptEvidence(
     return cached.evidence;
   }
 
-  let evidence = await scanTranscriptTail(transcriptPath, stat.size, TRANSCRIPT_TAIL_BYTES);
-  // Widen only for a missing assistant record: it is the sole source of effort, and the
-  // command record alone cannot replace it.
-  if (!evidence.assistant && stat.size > TRANSCRIPT_TAIL_BYTES) {
-    evidence = await scanTranscriptTail(transcriptPath, stat.size, TRANSCRIPT_TAIL_MAX_BYTES);
-  }
+  // Growth on a file we have already resolved is the overwhelmingly common case, and only the
+  // appended bytes can hold anything newer. A shrink means a rewrite, so the cursor is void.
+  const result =
+    sameFile && cached.evidence.assistant && stat.size >= cached.size
+      ? await scanAppended(transcriptPath, cached, stat.size)
+      : await scanTailWidening(transcriptPath, stat.size);
 
   transcriptEvidenceCache = {
     sessionId,
     transcriptPath,
     mtimeMs: stat.mtimeMs,
     size: stat.size,
-    evidence,
+    consumedUpTo: result.consumedUpTo,
+    evidence: result.evidence,
     timestamp: Date.now(),
   };
-  return evidence;
+  return result.evidence;
 }
 
 /**
- * Reads the last `windowBytes` of the transcript and walks backwards, taking the first
- * assistant record and the first `/model` record it meets. Malformed lines are skipped.
+ * Incremental read of everything appended since the last scan.
+ *
+ * This is what makes the model stable. Evidence already proven stays proven — transcripts are
+ * append-only, so an earlier assistant record does not stop being true because a 500 KB tool
+ * result landed after it. Without this, every large mid-turn append pushed the last assistant
+ * record out of any fixed tail window and the model silently disappeared from the status bar
+ * until the turn ended. It is also the cheap path: cost is proportional to the bytes added,
+ * not to the size of the transcript.
  */
-async function scanTranscriptTail(
+async function scanAppended(
   filePath: string,
-  size: number,
-  windowBytes: number
-): Promise<TranscriptEvidence> {
+  cached: TranscriptEvidenceCache,
+  size: number
+): Promise<ScanResult> {
+  const scan = await scanRange(filePath, cached.consumedUpTo, size, false);
+  return {
+    evidence: {
+      assistant: scan.evidence.assistant ?? cached.evidence.assistant,
+      command: scan.evidence.command ?? cached.evidence.command,
+    },
+    consumedUpTo: scan.consumedUpTo,
+  };
+}
+
+/**
+ * Cold read: try progressively larger tails until an assistant record turns up. Runs on the
+ * first read of a session and after a rewrite, never on the append path.
+ */
+async function scanTailWidening(filePath: string, size: number): Promise<ScanResult> {
+  let result: ScanResult = { evidence: NO_TRANSCRIPT_EVIDENCE, consumedUpTo: size };
+
+  for (const windowBytes of TRANSCRIPT_TAIL_WINDOWS) {
+    const start = Math.max(0, size - windowBytes);
+    result = await scanRange(filePath, start, size, start > 0);
+    // The assistant record is the sole source of effort, so a command record alone is not
+    // enough to stop widening.
+    if (result.evidence.assistant || start === 0) break;
+  }
+
+  return result;
+}
+
+/**
+ * Reads `[start, end)` and walks backwards, taking the first assistant record and the first
+ * `/model` record it meets. Malformed lines are skipped.
+ *
+ * `dropFirstLine` must be set when `start` is not known to be a line boundary — a tail read
+ * slices its first line mid-record. The incremental path resumes from a boundary and must not
+ * drop anything.
+ */
+async function scanRange(
+  filePath: string,
+  start: number,
+  end: number,
+  dropFirstLine: boolean
+): Promise<ScanResult> {
   const empty: TranscriptEvidence = { assistant: null, command: null };
 
-  const offset = Math.max(0, size - windowBytes);
-  const length = size - offset;
-  if (length <= 0) return empty;
+  const length = end - start;
+  if (length <= 0) return { evidence: empty, consumedUpTo: end };
 
   const handle = await fs.promises.open(filePath, 'r');
   try {
     const buffer = Buffer.alloc(length);
-    // `size` came from a stat that may already be stale: a rewrite or compaction can shrink
+    // `end` came from a stat that may already be stale: a rewrite or compaction can shrink
     // the file before this read lands, leaving the tail of the buffer as NUL padding. Decoding
     // that padding produces lines that silently fail JSON.parse, which reads as "no evidence"
     // at exactly the moment the fallback matters most. Trust bytesRead, not the stat.
-    const { bytesRead } = await handle.read(buffer, 0, length, offset);
-    if (bytesRead <= 0) return empty;
-    const lines = buffer.subarray(0, bytesRead).toString('utf-8').split('\n');
+    const { bytesRead } = await handle.read(buffer, 0, length, start);
+    if (bytesRead <= 0) return { evidence: empty, consumedUpTo: start };
+    const chunk = buffer.subarray(0, bytesRead);
 
-    // A non-zero offset almost certainly slices the first line mid-record. When the
-    // offset is 0 every line is whole, so dropping one would lose a single-line file.
-    if (offset > 0) lines.shift();
+    // Anything after the final newline is a record still being written. Stopping the cursor
+    // there means the next read re-reads it whole, so a partial line is never lost or
+    // half-parsed. Computed on bytes, not the decoded string, so multi-byte characters
+    // cannot shift the offset.
+    const lastNewline = chunk.lastIndexOf(0x0a);
+    const consumedUpTo = lastNewline >= 0 ? start + lastNewline + 1 : start;
+
+    const lines = chunk.toString('utf-8').split('\n');
+    if (dropFirstLine) lines.shift();
 
     let assistant: AssistantEvidence | null = null;
     let command: CommandEvidence | null = null;
@@ -477,7 +542,7 @@ async function scanTranscriptTail(
       }
     }
 
-    return { assistant, command };
+    return { evidence: { assistant, command }, consumedUpTo };
   } finally {
     await handle.close();
   }
