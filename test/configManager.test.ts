@@ -22,6 +22,8 @@ describe('ConfigManager', () => {
     expect(config.statusBar.showResetTimer).toBe(true);
     expect(config.statusBar.showTokenCount).toBe(false);
     expect(config.statusBar.showSessionCount).toBe(false);
+    expect(config.statusBar.showModel).toBe(true);
+    expect(config.statusBar.showEffort).toBe(true);
     expect(config.sessionResetIntervalMinutes).toBe(300);
     expect(config.sessionTokenLimit).toBe(8_000_000);
     expect(config.pollingIntervalSeconds).toBe(30);
@@ -31,7 +33,17 @@ describe('ConfigManager', () => {
     expect(config.notifications.onNewSession).toBe(true);
     expect(config.notifications.onSessionEnd).toBe(true);
     expect(config.notifications.onResetTimerComplete).toBe(true);
+    expect(config.notifications.onTaskComplete).toBe(true);
+    expect(config.notifications.onApiRefresh).toBe(true);
     expect(config.claudeHomePath).toBe(path.join(os.homedir(), '.claude'));
+  });
+
+  it('should respect notifications.onApiRefresh when disabled', () => {
+    setMockConfig({ 'notifications.onApiRefresh': false });
+
+    const config = configManager.getConfig();
+
+    expect(config.notifications.onApiRefresh).toBe(false);
   });
 
   it('should return custom values when overrides are set', () => {
@@ -39,6 +51,8 @@ describe('ConfigManager', () => {
       'statusBar.showResetTimer': false,
       'statusBar.showTokenCount': true,
       'statusBar.showSessionCount': true,
+      'statusBar.showModel': false,
+      'statusBar.showEffort': false,
       sessionResetIntervalMinutes: 600,
       sessionTokenLimit: 4_000_000,
       pollingIntervalSeconds: 15,
@@ -50,6 +64,8 @@ describe('ConfigManager', () => {
     expect(config.statusBar.showResetTimer).toBe(false);
     expect(config.statusBar.showTokenCount).toBe(true);
     expect(config.statusBar.showSessionCount).toBe(true);
+    expect(config.statusBar.showModel).toBe(false);
+    expect(config.statusBar.showEffort).toBe(false);
     expect(config.sessionResetIntervalMinutes).toBe(600);
     expect(config.sessionTokenLimit).toBe(4_000_000);
     expect(config.pollingIntervalSeconds).toBe(15);

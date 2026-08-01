@@ -6,6 +6,12 @@ import { TASK_DETECTOR_POLL_MS, TASK_NOTIFICATION_COOLDOWN_MS } from '../constan
 
 interface SessionWatch {
   jsonlPath: string;
+  /**
+   * Taken from the session file, never decoded back out of the project directory name. That
+   * encoding replaces both '/' and '.' with '-', so it cannot be inverted: 'claude-pulse'
+   * and 'claude/pulse' produce the same directory.
+   */
+  cwd: string;
   lastSize: number;
   idleTimer: ReturnType<typeof setTimeout> | null;
   lastNotifiedAt: number;
@@ -50,6 +56,7 @@ export class TaskCompletionDetector implements vscode.Disposable {
           const size = getFileSize(jsonlPath);
           this.watches.set(session.sessionId, {
             jsonlPath,
+            cwd: session.cwd ?? '',
             lastSize: size,
             idleTimer: null,
             lastNotifiedAt: 0,
@@ -87,9 +94,7 @@ export class TaskCompletionDetector implements vscode.Disposable {
         const now = Date.now();
         if (now - watch.lastNotifiedAt >= TASK_NOTIFICATION_COOLDOWN_MS) {
           watch.lastNotifiedAt = now;
-          // Find cwd from the session data
-          const cwd = extractCwd(watch.jsonlPath, sessionId);
-          this._onTaskCompleted.fire({ sessionId, cwd });
+          this._onTaskCompleted.fire({ sessionId, cwd: watch.cwd || sessionId });
         }
       }, this.idleThresholdMs);
     }
@@ -162,13 +167,4 @@ function hasEndTurn(content: string): boolean {
     }
   }
   return false;
-}
-
-function extractCwd(jsonlPath: string, sessionId: string): string {
-  // The project directory name in the path encodes the cwd
-  // e.g., ~/.claude/projects/-Users-alireza-WebstormProjects-claude-pulse/sessionId.jsonl
-  const projectDir = path.basename(path.dirname(jsonlPath));
-  // Convert dashes back to path separators: -Users-alireza → /Users/alireza
-  const cwd = projectDir.replace(/^-/, '/').replace(/-/g, '/');
-  return cwd || sessionId;
 }

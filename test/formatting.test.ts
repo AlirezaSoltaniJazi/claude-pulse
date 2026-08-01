@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { formatDuration, formatDurationShort, formatNumber } from '../src/utils/formatting';
+import {
+  formatDuration,
+  formatDurationShort,
+  formatEffortLevel,
+  formatModelName,
+  formatNumber,
+  parseModelId,
+} from '../src/utils/formatting';
 import { getCurrentWeekBounds, formatDate } from '../src/utils/dateUtils';
 
 describe('formatDuration', () => {
@@ -67,6 +74,143 @@ describe('formatNumber', () => {
 
   it('formats billions with B suffix', () => {
     expect(formatNumber(2_000_000_000)).toBe('2.0B');
+  });
+});
+
+describe('formatModelName', () => {
+  it('formats the current model id', () => {
+    expect(formatModelName('claude-opus-5')).toBe('Opus 5');
+  });
+
+  it('formats other real ids found on disk', () => {
+    expect(formatModelName('claude-opus-4-8')).toBe('Opus 4.8');
+    expect(formatModelName('claude-opus-4-7')).toBe('Opus 4.7');
+    expect(formatModelName('claude-fable-5')).toBe('Fable 5');
+  });
+
+  it('strips a trailing date stamp', () => {
+    expect(formatModelName('claude-haiku-4-5-20251001')).toBe('Haiku 4.5');
+  });
+
+  it('handles legacy version-first ids', () => {
+    expect(formatModelName('claude-3-5-sonnet-20241022')).toBe('Sonnet 3.5');
+  });
+
+  it('handles Bedrock-style ids', () => {
+    expect(formatModelName('us.anthropic.claude-opus-4-5-20251101-v1:0')).toBe('Opus 4.5');
+  });
+
+  it('handles Vertex-style ids', () => {
+    expect(formatModelName('claude-opus-4-5@20251101')).toBe('Opus 4.5');
+  });
+
+  it('strips a trailing variant tag', () => {
+    expect(formatModelName('claude-opus-5[1m]')).toBe('Opus 5');
+  });
+
+  it('formats a model id it has never seen', () => {
+    expect(formatModelName('claude-quasar-6-2-20270815')).toBe('Quasar 6.2');
+  });
+
+  it('returns the raw id when there is nothing to parse', () => {
+    expect(formatModelName('2024-01')).toBe('2024-01');
+  });
+
+  it('returns an empty string for the synthetic placeholder', () => {
+    expect(formatModelName('<synthetic>')).toBe('');
+  });
+
+  it('returns an empty string for null, undefined and blank input', () => {
+    expect(formatModelName(null)).toBe('');
+    expect(formatModelName(undefined)).toBe('');
+    expect(formatModelName('   ')).toBe('');
+  });
+
+  it('formats a bare family alias as written in settings.json', () => {
+    expect(formatModelName('opus[1m]')).toBe('Opus');
+    expect(formatModelName('sonnet')).toBe('Sonnet');
+    expect(formatModelName('haiku')).toBe('Haiku');
+    expect(formatModelName('fable')).toBe('Fable');
+  });
+
+  it('formats a full id carrying a variant tag', () => {
+    expect(formatModelName('claude-fable-5[1m]')).toBe('Fable 5');
+  });
+
+  it('returns an empty string for selectors that do not name a model', () => {
+    expect(formatModelName('default')).toBe('');
+    expect(formatModelName('opusplan')).toBe('');
+  });
+
+  it('matches selectors case-insensitively', () => {
+    expect(formatModelName('Default')).toBe('');
+    expect(formatModelName('OPUSPLAN')).toBe('');
+  });
+
+  it('trims surrounding whitespace before parsing', () => {
+    expect(formatModelName('  opus[1m]  ')).toBe('Opus');
+  });
+});
+
+describe('parseModelId', () => {
+  it('splits a full id into family and version', () => {
+    expect(parseModelId('claude-opus-5')).toEqual({ family: 'opus', version: '5' });
+    expect(parseModelId('claude-haiku-4-5-20251001')).toEqual({ family: 'haiku', version: '4.5' });
+    expect(parseModelId('claude-fable-5[1m]')).toEqual({ family: 'fable', version: '5' });
+    expect(parseModelId('us.anthropic.claude-opus-4-5-20251101-v1:0')).toEqual({
+      family: 'opus',
+      version: '4.5',
+    });
+  });
+
+  it('reads the family out of a legacy version-first id', () => {
+    expect(parseModelId('claude-3-5-sonnet-20241022')).toEqual({
+      family: 'sonnet',
+      version: '3.5',
+    });
+  });
+
+  it('leaves the version empty for a bare alias', () => {
+    expect(parseModelId('opus[1m]')).toEqual({ family: 'opus', version: '' });
+    expect(parseModelId('sonnet')).toEqual({ family: 'sonnet', version: '' });
+  });
+
+  it('gives two ids of the same family the same family string', () => {
+    expect(parseModelId('claude-opus-4-8')?.family).toBe(parseModelId('opus[1m]')?.family);
+  });
+
+  it('returns null for input that does not name a model', () => {
+    expect(parseModelId(null)).toBeNull();
+    expect(parseModelId(undefined)).toBeNull();
+    expect(parseModelId('')).toBeNull();
+    expect(parseModelId('   ')).toBeNull();
+    expect(parseModelId('<synthetic>')).toBeNull();
+    expect(parseModelId('default')).toBeNull();
+    expect(parseModelId('opusplan')).toBeNull();
+    expect(parseModelId('2024-01')).toBeNull();
+  });
+});
+
+describe('formatEffortLevel', () => {
+  it('passes known levels through lowercased', () => {
+    expect(formatEffortLevel('xhigh')).toBe('xhigh');
+    expect(formatEffortLevel('high')).toBe('high');
+    expect(formatEffortLevel('low')).toBe('low');
+    expect(formatEffortLevel('XHIGH')).toBe('xhigh');
+  });
+
+  it('abbreviates medium', () => {
+    expect(formatEffortLevel('medium')).toBe('med');
+  });
+
+  it('truncates unknown future levels', () => {
+    expect(formatEffortLevel('ultra-extreme')).toBe('ultra-ex');
+  });
+
+  it('returns an empty string for null, undefined and blank input', () => {
+    expect(formatEffortLevel(null)).toBe('');
+    expect(formatEffortLevel(undefined)).toBe('');
+    expect(formatEffortLevel('  ')).toBe('');
   });
 });
 

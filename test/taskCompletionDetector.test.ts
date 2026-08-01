@@ -91,6 +91,42 @@ describe('TaskCompletionDetector', () => {
     expect(completedEvents[0].sessionId).toBe('sess-1');
   });
 
+  it('reports the cwd from the session file, not the project directory name', () => {
+    // The project directory encoding replaces both '/' and '.' with '-', so it cannot be
+    // inverted: decoding '-Users-me-projects-claude-pulse' yields '/Users/me/projects/claude/pulse'
+    // for any hyphenated project. The session file already carries the real cwd.
+    mockedFs.readdirSync = vi.fn().mockReturnValue(['-Users-me-projects-claude-pulse']);
+    detector = new TaskCompletionDetector(1);
+
+    const completedEvents: { sessionId: string; cwd: string }[] = [];
+    detector.onTaskCompleted((e) => completedEvents.push(e));
+
+    detector.updateSessions(
+      [
+        {
+          pid: 123,
+          sessionId: 'sess-1',
+          cwd: '/Users/me/projects/claude-pulse',
+          startedAt: Date.now(),
+        },
+      ],
+      '/home/user/.claude'
+    );
+
+    const endTurnLine = makeEndTurnEvent('2026-03-30T12:00:00Z') + '\n';
+    mockedFs.statSync = vi.fn().mockReturnValue({ size: endTurnLine.length });
+    mockedFs.readSync = vi.fn().mockImplementation((_fd, buffer: Buffer) => {
+      buffer.write(endTurnLine);
+      return endTurnLine.length;
+    });
+
+    vi.advanceTimersByTime(2100);
+    vi.advanceTimersByTime(1100);
+
+    expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0].cwd).toBe('/Users/me/projects/claude-pulse');
+  });
+
   it('should NOT fire when tool_use is the last event', () => {
     detector = new TaskCompletionDetector(1);
 

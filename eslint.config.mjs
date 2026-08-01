@@ -9,6 +9,42 @@ export default [
   },
   eslint.configs.recommended,
   {
+    // Build and release tooling: plain Node scripts, not part of the extension bundle, so
+    // they get the base recommended rules without the TypeScript layer. Split by extension
+    // because launch-dev.js is CommonJS while the release scripts are ESM.
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        __dirname: 'readonly',
+        require: 'readonly',
+        module: 'writable',
+      },
+    },
+    rules: {
+      eqeqeq: ['error', 'always'],
+      'no-throw-literal': 'error',
+    },
+  },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+      },
+    },
+    rules: {
+      eqeqeq: ['error', 'always'],
+      'no-throw-literal': 'error',
+    },
+  },
+  {
     files: ['src/**/*.ts'],
     languageOptions: {
       parser: tsparser,

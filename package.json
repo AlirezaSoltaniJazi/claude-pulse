@@ -57,6 +57,16 @@
           "default": false,
           "description": "Show today's session count in status bar"
         },
+        "claudePulse.statusBar.showModel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Claude model currently in use (e.g. 'Opus 5') in the status bar"
+        },
+        "claudePulse.statusBar.showEffort": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the model's reasoning effort level (e.g. 'xhigh') in the status bar. Read from the active session transcript, falling back to the global effortLevel in ~/.claude/settings.json."
+        },
         "claudePulse.sessionResetIntervalMinutes": {
           "type": "number",
           "default": 300,
@@ -109,6 +119,11 @@
           "default": true,
           "description": "Notify when Claude finishes a task and is waiting for input"
         },
+        "claudePulse.notifications.onApiRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a confirmation notification when API usage data is manually refreshed (e.g. 'API data refreshed successfully'). Disable to silence these toasts; errors and warnings are always shown."
+        },
         "claudePulse.taskCompletionIdleSeconds": {
           "type": "number",
           "default": 10,
@@ -127,14 +142,21 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
-    "lint": "eslint src",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "dev": "npm run build && node scripts/launch-dev.js",
+    "launch": "node scripts/launch-dev.js",
+    "lint": "eslint src scripts",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{js,mjs}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.{js,mjs}\"",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules node_modules/.bin/vitest run",
     "test:coverage": "node --experimental-vm-modules node_modules/.bin/vitest run --coverage",
     "prepare": "husky",
     "audit:security": "npm audit --omit=dev --audit-level=critical",
-    "release": "npm run lint && npm run format:check && npm test && npm run build && vsce package && vsce publish"
+    "package": "npm run build && vsce package --no-update-package-json",
+    "bump:patch": "node scripts/bump-version.mjs patch",
+    "bump:minor": "node scripts/bump-version.mjs minor",
+    "bump:major": "node scripts/bump-version.mjs major",
+    "release": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run package"
   },
   "lint-staged": {
     "src/**/*.ts": [
@@ -144,26 +166,35 @@
     "test/**/*.ts": [
       "eslint --fix",
       "prettier --write"
+    ],
+    "scripts/**/*.{js,mjs}": [
+      "eslint --fix",
+      "prettier --write"
     ]
   },
   "dependencies": {
     "node-notifier": "^10.0.1"
   },
+  "overrides": {
+    "node-notifier": {
+      "uuid": "^11.1.1"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.5.2",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.0",
-    "@typescript-eslint/parser": "^8.58.0",
-    "@vitest/coverage-v8": "^4.1.2",
-    "@vscode/vsce": "^3.7.1",
-    "esbuild": "^0.28.0",
-    "eslint": "^10.2.0",
+    "@types/node": "^26.1.2",
+    "@types/vscode": "~1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@typescript-eslint/parser": "^8.65.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
-    "prettier": "^3.8.1",
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.2"
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

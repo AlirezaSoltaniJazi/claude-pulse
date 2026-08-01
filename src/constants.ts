@@ -6,6 +6,14 @@ export const MAX_RETRIES = 3;
 export const MAX_BACKOFF_MS = 10_000;
 export const MIN_BACKOFF_429_MS = 5_000;
 export const USAGE_CACHE_TTL_MS = 30_000;
+/**
+ * Floor between opportunistic (task-completion driven) usage refreshes. The detector's own
+ * cooldown is per session; with several sessions running this global floor is the only thing
+ * standing between a busy machine and the rate limit.
+ */
+export const USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS = 120_000;
+/** After a 429, opportunistic refreshes stand down for this long. Scheduled refreshes continue. */
+export const USAGE_RATE_LIMIT_COOLOFF_MS = 900_000;
 
 // Keychain
 export const KEYCHAIN_SERVICE = 'Claude Code-credentials';
@@ -13,6 +21,62 @@ export const KEYCHAIN_TIMEOUT_MS = 10_000;
 
 // JSONL Scanner
 export const SCAN_CACHE_TTL_MS = 60_000;
+
+// Model Reader
+/** Deliberately below the default 30s poll so a scheduled refresh is never served stale data. */
+export const MODEL_INFO_CACHE_TTL_MS = 10_000;
+/** Tail window for the transcript read — covers the last assistant record of a settled turn. */
+export const TRANSCRIPT_TAIL_BYTES = 64 * 1024;
+/**
+ * Widening ladder for a cold read, tried in order until an assistant record turns up.
+ *
+ * A single tool-result line is routinely enormous: measured across the 113 local transcripts
+ * over 200 KB, the largest single line is 846 KB. Mid-turn, such a line sits AFTER the last
+ * assistant record, so any ceiling below it makes the model vanish from the status bar for the
+ * duration of the turn — precisely when the user is watching. 4 MB clears the observed maximum
+ * with room to spare, and the ladder means the common case still costs one 64 KB read.
+ *
+ * The ceiling is not the real protection against cost: the incremental append-only scan is.
+ * This ladder only runs on a cold read or after a rewrite.
+ */
+export const TRANSCRIPT_TAIL_WINDOWS = [
+  TRANSCRIPT_TAIL_BYTES,
+  256 * 1024,
+  1024 * 1024,
+  4 * 1024 * 1024,
+];
+/** Assistant records carrying this model id are injected interrupt/API-error placeholders. */
+export const SYNTHETIC_MODEL_ID = '<synthetic>';
+/**
+ * `/model` choices that are not a model id. 'default' resolves server-side and 'opusplan' is a
+ * routing mode — neither names a model, so neither is meaningful in a status bar.
+ */
+export const NON_MODEL_SELECTORS = new Set(['default', 'opusplan']);
+/**
+ * A `/model` invocation writes this line into the session transcript with the *resolved* id,
+ * e.g. `<local-command-stdout>Set model to claude-fable-5[1m]</local-command-stdout>`.
+ * Verified against every `/model` record on this machine.
+ */
+export const MODEL_COMMAND_STDOUT_PATTERN =
+  /<local-command-stdout>\s*Set model to\s+([^<]+?)\s*<\/local-command-stdout>/;
+/** U+00B7 MIDDLE DOT — escaped to keep the source ASCII-only. */
+export const MODEL_EFFORT_SEPARATOR = ' \u00B7 ';
+
+// File Watcher
+/**
+ * Coalesces transcript appends and settings.json rewrites. Measured minimum inter-append gap
+ * was 82ms, so this is sized to land clear of a mid-append read, NOT to shed load: appends are
+ * ~1.9s apart at the median. Load is controlled by the handler being cheap, not by this value.
+ */
+export const MODEL_WATCH_DEBOUNCE_MS = 250;
+/**
+ * Dual-strategy fallback for BOTH settings.json and the active transcript — an FSWatch is
+ * never trusted on its own. For settings.json the write style (in-place vs temp+rename) is an
+ * upstream implementation detail; for the transcript the watch is file-level, so it dies
+ * permanently the moment the inode is replaced by a rewrite or compaction. FSEvents can also
+ * be dropped outright on network and cloud-synced home directories.
+ */
+export const WATCH_POLL_INTERVAL_MS = 2_000;
 
 // Session Monitor
 export const LIVENESS_CHECK_INTERVAL_MS = 10_000;

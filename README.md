@@ -71,6 +71,8 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `statusBar.showResetTimer` | boolean | `true` | Show session reset countdown in status bar |
 | `statusBar.showTokenCount` | boolean | `false` | Show today's message count in status bar |
 | `statusBar.showSessionCount` | boolean | `false` | Show today's session count in status bar |
+| `statusBar.showModel` | boolean | `true` | Show the Claude model currently in use (e.g. `Opus 5`) in status bar |
+| `statusBar.showEffort` | boolean | `true` | Show the model's reasoning effort level (e.g. `xhigh`) in status bar |
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
 | `sessionTokenLimit` | number | `8000000` | Estimated token limit per session window (for usage % calculation) |
 | `pollingIntervalSeconds` | number | `30` | How often to check Claude files for changes (min: 5) |
@@ -80,6 +82,7 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `notifications.onNewSession` | boolean | `true` | Notify when a new Claude session starts |
 | `notifications.onSessionEnd` | boolean | `true` | Notify when a Claude session ends |
 | `notifications.onResetTimerComplete` | boolean | `true` | Notify when the session reset timer reaches zero |
+| `notifications.onApiRefresh` | boolean | `true` | Show a confirmation toast when API usage data is manually refreshed (errors are always shown) |
 | `claudeHomePath` | string | `""` | Custom path to .claude directory (leave empty for `~/.claude`) |
 
 ## Commands
