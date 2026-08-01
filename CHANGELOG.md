@@ -5,6 +5,45 @@ All notable changes to the Claude Pulse extension will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+
+- Regenerated `package-lock.json`, clearing 8 advisories (7 high, 1 moderate) in transitive dev dependencies:
+  `brace-expansion`, `fast-uri`, `form-data`, `js-yaml`, `linkify-it`, `markdown-it` and `undici`
+  (all via `@vscode/vsce`), plus `postcss` (via `vitest` → `vite`). `npm audit` and `npm audit --omit=dev`
+  both report 0 vulnerabilities. No production dependency was ever affected.
+
+### Fixed
+
+- **Release packaging** — `vsce package` refused to run because `@types/vscode` (`^1.120.0`) exceeded
+  `engines.vscode` (`^1.85.0`), which vsce treats as a hard error. Pinned `@types/vscode` to `~1.85.0` to match
+  the declared engine. The extension's newest API use is `StatusBarItem.backgroundColor` (VS Code 1.53), so no
+  functionality is lost and no user on an older VS Code is dropped.
+- **Type checking** — `tsc --noEmit` failed with 56 `Cannot find name` errors for Node globals (`fs`, `process`,
+  `setInterval`, …). TypeScript 6 defaults `moduleResolution` to `bundler`, which does not auto-include `@types`.
+  Added `"types": ["node", "vscode"]` to `tsconfig.json`. Not caught by CI, which builds with esbuild only.
+- **CI matrix** — the Node 18 leg could no longer install, since vitest 4 and eslint 10 require
+  Node `^20.19 || ^22.13 || >=24`. Matrix moved to Node 20 and 22, and `fail-fast: false` added so legs report
+  independently rather than being cancelled.
+
+### Changed
+
+- Bump `@types/node` from 25.9.3 to 26.1.2
+- Bump `@typescript-eslint/eslint-plugin` from 8.61.0 to 8.65.0
+- Bump `@typescript-eslint/parser` from 8.61.0 to 8.65.0
+- Bump `@vitest/coverage-v8` from 4.1.8 to 4.1.10
+- Bump `esbuild` from 0.28.0 to 0.28.1
+- Bump `eslint` from 10.5.0 to 10.8.0
+- Bump `lint-staged` from 16.4.0 to 17.3.0 — raises the floor for the pre-commit hook to Node >= 22.22.1
+  (developer machines only; never runs in CI)
+- Bump `prettier` from 3.8.4 to 3.9.6 (no formatting drift — `format:check` passes unchanged)
+- Bump `vitest` from 4.1.8 to 4.1.10
+- Pin `@types/vscode` from `^1.120.0` down to `~1.85.0`, and add a Dependabot ignore rule so it is only raised
+  deliberately alongside `engines.vscode`
+- Held `typescript` at 6.0.3 — TypeScript 7 is the native Go port and ships no JavaScript compiler API, which
+  `@typescript-eslint` 8.65.0 rejects at both install (`ERESOLVE`, peer range `>=4.8.4 <6.1.0`) and lint time
+
 ## [0.2.7] - 2026-04-04
 
 ### Added

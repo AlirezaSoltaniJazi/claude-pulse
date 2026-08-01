@@ -64,7 +64,7 @@ npm run watch          # then F5 in VS Code to launch Extension Host
 # Production build
 npm run build
 
-# Tests (66 tests)
+# Tests (74 tests)
 npm test
 npm run test:coverage
 
@@ -210,7 +210,7 @@ describe('MyModule', () => {
 - **Framework**: Vitest (globals enabled — no manual imports needed)
 - **Mock**: Manual VS Code mock in `test/__mocks__/vscode.ts` (aliased via vitest.config.ts)
 - **Coverage excluded**: `src/ui/webviewContent.ts` (HTML generation)
-- **Run**: `npm test` (66 tests) or `npm run test:coverage`
+- **Run**: `npm test` (74 tests) or `npm run test:coverage`
 - **Pattern**: Setup mock state → call function → assert result → dispose
 
 ## Known Gotchas
