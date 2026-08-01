@@ -84,9 +84,21 @@ export interface ClaudeUsage {
 /** Where the effort value was resolved from — 'settings' means a global default, not session truth. */
 export type EffortSource = 'transcript' | 'settings';
 
+/**
+ * Where the displayed model id came from.
+ *
+ *  - 'transcript' — the last assistant turn of this session. Authoritative.
+ *  - 'command'    — this session's own `/model` record. Authoritative, and fresher.
+ *  - 'settings'   — the last *global* `/model` selection, which this session has not yet
+ *                   confirmed by running a turn. Optimistic; the UI marks it.
+ */
+export type ModelSource = 'transcript' | 'command' | 'settings';
+
 export interface ModelInfo {
-  /** Raw model id exactly as it appeared in the transcript, e.g. 'claude-opus-5'. */
+  /** Raw model id, e.g. 'claude-opus-5'. May be a bare alias ('opus[1m]') when modelSource is 'settings'. */
   model: string | null;
+  /** Null only when model is null. */
+  modelSource: ModelSource | null;
   /** Raw effort value, e.g. 'xhigh'. Null when neither transcript nor settings.json had one. */
   effort: string | null;
   /** Null only when effort is null. */

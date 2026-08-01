@@ -174,17 +174,26 @@ export class StatusBar implements vscode.Disposable {
 
       if (segment.length > 0) {
         // '~' marks a non-authoritative value, matching the estimated-timer convention.
-        const prefix = this.modelInfo.isSessionLive ? '' : '~';
+        // Two ways to earn it, and they cannot collide in one render: either the session is
+        // dead, or the model is the latest global /model selection this session has not yet
+        // confirmed — which is only ever resolved for a live session.
+        const isOptimisticModel =
+          modelLabel.length > 0 && this.modelInfo.modelSource === 'settings';
+        const prefix = !this.modelInfo.isSessionLive || isOptimisticModel ? '~' : '';
         parts.push(`$(sparkle) ${prefix}${segment}`);
 
         // Tooltip carries the raw id — the bar shows the pretty label.
         if (modelLabel.length > 0 && this.modelInfo.model) {
-          tooltipParts.push(`Model: ${this.modelInfo.model}`);
+          tooltipParts.push(
+            this.modelInfo.modelSource === 'settings'
+              ? `Model: ${this.modelInfo.model} (latest /model selection, unconfirmed)`
+              : `Model: ${this.modelInfo.model}`
+          );
         }
         if (effortLabel.length > 0 && this.modelInfo.effort) {
           tooltipParts.push(
             this.modelInfo.effortSource === 'settings'
-              ? `Effort: ${this.modelInfo.effort} (global default)`
+              ? `Effort: ${this.modelInfo.effort} (global setting)`
               : `Effort: ${this.modelInfo.effort}`
           );
         }

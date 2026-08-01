@@ -5,6 +5,7 @@ import {
   formatEffortLevel,
   formatModelName,
   formatNumber,
+  parseModelId,
 } from '../src/utils/formatting';
 import { getCurrentWeekBounds, formatDate } from '../src/utils/dateUtils';
 
@@ -123,6 +124,70 @@ describe('formatModelName', () => {
     expect(formatModelName(null)).toBe('');
     expect(formatModelName(undefined)).toBe('');
     expect(formatModelName('   ')).toBe('');
+  });
+
+  it('formats a bare family alias as written in settings.json', () => {
+    expect(formatModelName('opus[1m]')).toBe('Opus');
+    expect(formatModelName('sonnet')).toBe('Sonnet');
+    expect(formatModelName('haiku')).toBe('Haiku');
+    expect(formatModelName('fable')).toBe('Fable');
+  });
+
+  it('formats a full id carrying a variant tag', () => {
+    expect(formatModelName('claude-fable-5[1m]')).toBe('Fable 5');
+  });
+
+  it('returns an empty string for selectors that do not name a model', () => {
+    expect(formatModelName('default')).toBe('');
+    expect(formatModelName('opusplan')).toBe('');
+  });
+
+  it('matches selectors case-insensitively', () => {
+    expect(formatModelName('Default')).toBe('');
+    expect(formatModelName('OPUSPLAN')).toBe('');
+  });
+
+  it('trims surrounding whitespace before parsing', () => {
+    expect(formatModelName('  opus[1m]  ')).toBe('Opus');
+  });
+});
+
+describe('parseModelId', () => {
+  it('splits a full id into family and version', () => {
+    expect(parseModelId('claude-opus-5')).toEqual({ family: 'opus', version: '5' });
+    expect(parseModelId('claude-haiku-4-5-20251001')).toEqual({ family: 'haiku', version: '4.5' });
+    expect(parseModelId('claude-fable-5[1m]')).toEqual({ family: 'fable', version: '5' });
+    expect(parseModelId('us.anthropic.claude-opus-4-5-20251101-v1:0')).toEqual({
+      family: 'opus',
+      version: '4.5',
+    });
+  });
+
+  it('reads the family out of a legacy version-first id', () => {
+    expect(parseModelId('claude-3-5-sonnet-20241022')).toEqual({
+      family: 'sonnet',
+      version: '3.5',
+    });
+  });
+
+  it('leaves the version empty for a bare alias', () => {
+    expect(parseModelId('opus[1m]')).toEqual({ family: 'opus', version: '' });
+    expect(parseModelId('sonnet')).toEqual({ family: 'sonnet', version: '' });
+  });
+
+  it('gives two ids of the same family the same family string', () => {
+    expect(parseModelId('claude-opus-4-8')?.family).toBe(parseModelId('opus[1m]')?.family);
+  });
+
+  it('returns null for input that does not name a model', () => {
+    expect(parseModelId(null)).toBeNull();
+    expect(parseModelId(undefined)).toBeNull();
+    expect(parseModelId('')).toBeNull();
+    expect(parseModelId('   ')).toBeNull();
+    expect(parseModelId('<synthetic>')).toBeNull();
+    expect(parseModelId('default')).toBeNull();
+    expect(parseModelId('opusplan')).toBeNull();
+    expect(parseModelId('2024-01')).toBeNull();
   });
 });
 

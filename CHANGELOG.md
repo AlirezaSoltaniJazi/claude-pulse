@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and its reasoning effort level, e.g. `$(sparkle) Opus 5 · xhigh`. Both values come from the last assistant
   record in the active session's transcript (`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`); the effort
   falls back to the global `effortLevel` in `~/.claude/settings.json` for models that predate the per-turn field,
-  which the tooltip marks as `(global default)`. When the owning session's process is no longer alive the segment
+  which the tooltip marks as `(global setting)`. When the owning session's process is no longer alive the segment
   is prefixed with `~`, matching the existing estimated-timer convention.
   Controlled by two new settings, **both defaulting to `true`**, so the status bar gains this segment on upgrade:
   `claudePulse.statusBar.showModel` and `claudePulse.statusBar.showEffort`. Set either to `false` to hide that
@@ -25,6 +25,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running Claude in several projects at once saw another project's state — visible as the wrong model, since the
   model is chosen per session. Windows with no folder open now fall back to the most recently started session
   rather than an arbitrary one. This also makes the reset timer describe the same session as the model.
+- **Real-time model and effort updates** — running `/model` now updates the status bar in roughly a quarter of a
+  second instead of waiting out the polling interval (30s by default). `FileWatcher` gained two events:
+  `onModelSettingsChanged`, fired when `~/.claude/settings.json` changes, and `onTranscriptChanged`, fired when
+  the primary session's transcript is appended to. Both are debounced by 250ms and guarded by an mtime/size
+  check, which also stops the transcript read from re-triggering its own watcher. `settings.json` is watched via
+  the **directory** plus a 2s mtime poll rather than a file-level watch. Claude Code currently rewrites it in
+  place (verified: the inode and birthtime survive a rewrite), so a file watch would work today — but it also
+  writes other files atomically (`plugins/blocklist.json` leaves `<name>.<hex>.tmp` siblings), and a file watch
+  goes permanently dead after the first temp+rename. Watching the directory is correct under both regimes.
+  Measured end to end against a copy of the real
+  `~/.claude/settings.json`: 266ms for an atomic rewrite, 267ms for an in-place rewrite, 255ms for a transcript
+  append.
+  These events run a targeted refresh that re-reads only the model, **not** the full `refreshData()` — that one
+  walks every project directory and would be far too heavy to run on every transcript append.
+- **Opportunistic usage refresh** — usage is now also refreshed when a task completes, rather than only on the
+  hourly timer, subject to a global 2-minute floor and a 15-minute stand-down after a rate limit. Usage is a
+  server-side percentage, so it cannot be made truly real-time; local estimation is deliberately not attempted.
 
 ### Security
 

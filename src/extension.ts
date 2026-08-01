@@ -9,7 +9,7 @@ import {
 } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
-import { readModelInfo, clearModelCache } from './data/modelReader';
+import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
 import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
@@ -18,6 +18,11 @@ import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
 import { ClaudePulseData, SessionFile } from './types';
+import {
+  MIN_USAGE_REFRESH_INTERVAL_SEC,
+  USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS,
+  USAGE_RATE_LIMIT_COOLOFF_MS,
+} from './constants';
 
 let configManager: ConfigManager;
 let fileWatcher: FileWatcher;
@@ -66,6 +71,18 @@ export function activate(context: vscode.ExtensionContext): void {
   // Wire file watcher events — stats changes include usage data from cache file
   fileWatcher.onStatsChanged(() => refreshData(false));
   fileWatcher.onSessionsChanged(() => refreshData(false));
+  // Model/effort ride a targeted path, NOT refreshData(). See refreshModelInfo().
+  fileWatcher.onModelSettingsChanged(() => void refreshModelInfo());
+  fileWatcher.onTranscriptChanged(() => void refreshModelInfo());
+
+  // Usage is a network call, so it rides task completion — never a model switch, which
+  // spends no tokens and would only add rate-limit risk.
+  taskCompletionDetector.onTaskCompleted(() => void refreshUsageOpportunistically());
+
+  // pickPrimarySession() reads the workspace folders; nothing else notices them moving.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeWorkspaceFolders(() => void refreshData(false))
+  );
 
   // Wire config changes
   configManager.onConfigChanged((newConfig) => {
@@ -151,7 +168,7 @@ function startUsageRefreshInterval(intervalSeconds: number): void {
   if (usageRefreshInterval) {
     clearInterval(usageRefreshInterval);
   }
-  const intervalMs = Math.max(intervalSeconds, 60) * 1000;
+  const intervalMs = Math.max(intervalSeconds, MIN_USAGE_REFRESH_INTERVAL_SEC) * 1000;
   usageRefreshInterval = setInterval(() => refreshUsageData(false), intervalMs);
 }
 
@@ -214,6 +231,9 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     modelInfo,
   };
 
+  // Covers session death/restart, a new session appearing, and the fallback pick changing.
+  await retargetTranscriptWatch(config.claudeHomePath, primarySession);
+
   // Update session monitor and task completion detector
   sessionMonitor.updateSessions(sessions);
   taskCompletionDetector.updateSessions(activeSessions, config.claudeHomePath);
@@ -228,9 +248,73 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   }
 }
 
+/**
+ * Targeted refresh for model/effort only.
+ *
+ * Deliberately NOT refreshData(): that calls scanWeeklyUsage(), which walks every directory
+ * under <claudeHome>/projects and reads every .jsonl modified this week. Transcripts are
+ * appended many times per turn, so routing those appends through refreshData() would run that
+ * walk tens of times per minute. This path does one stat, one 64KB tail read and one settings
+ * stat, all of which are cached.
+ *
+ * It reuses the session list from the last refreshData(): session membership changes arrive on
+ * onSessionsChanged, which still runs the full refresh.
+ */
+async function refreshModelInfo(): Promise<void> {
+  const config = configManager.getConfig();
+  const primarySession = pickPrimarySession(
+    cachedData.activeSessions,
+    cachedData.mostRecentSession
+  );
+
+  const modelInfo = await readModelInfo(
+    config.claudeHomePath,
+    primarySession,
+    cachedData.activeSessions.length > 0
+  );
+
+  cachedData = { ...cachedData, modelInfo };
+  await retargetTranscriptWatch(config.claudeHomePath, primarySession);
+  updateUI();
+}
+
+/** Keeps the transcript watch pointed at whatever pickPrimarySession() currently returns. */
+async function retargetTranscriptWatch(
+  claudeHomePath: string,
+  session: SessionFile | null
+): Promise<void> {
+  const transcriptPath = session ? await resolveTranscriptPath(claudeHomePath, session) : null;
+  fileWatcher.watchTranscript(transcriptPath);
+}
+
+/**
+ * Usage is a percentage against an opaque server-side limit, so it can only ever be as fresh as
+ * the last API call. This nudges that call to happen after a task completes — when the number
+ * has actually moved — rather than waiting out the hour-long scheduled interval.
+ *
+ * The floor is global and module-level on purpose: TaskCompletionDetector's own cooldown is per
+ * session, which offers no protection at all when several sessions finish work at once.
+ */
+let nextOpportunisticUsageRefreshAt = 0;
+
+async function refreshUsageOpportunistically(): Promise<void> {
+  const now = Date.now();
+  if (now < nextOpportunisticUsageRefreshAt) return;
+  // Advanced BEFORE the await so concurrent completions cannot slip past the gate.
+  nextOpportunisticUsageRefreshAt = now + USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS;
+
+  // forceRefresh false, so USAGE_CACHE_TTL_MS acts as a second floor. Errors stay silent:
+  // at one call per turn a toast on every failure would be spam.
+  const result = await refreshUsageData(false, false, false);
+  if (result?.status === 'rate_limited') {
+    nextOpportunisticUsageRefreshAt = Date.now() + USAGE_RATE_LIMIT_COOLOFF_MS;
+  }
+}
+
 async function refreshUsageData(
   showFeedback: boolean = false,
-  forceRefresh: boolean = false
+  forceRefresh: boolean = false,
+  reportErrors: boolean = true
 ): Promise<FetchUsageResult | null> {
   try {
     const result = await fetchUsage(forceRefresh);
@@ -244,7 +328,7 @@ async function refreshUsageData(
     const isError = ['rate_limited', 'auth_error', 'no_credentials', 'error'].includes(
       result.status
     );
-    if (isError || showFeedback) {
+    if (showFeedback || (isError && reportErrors)) {
       showRefreshFeedback(result);
     }
     return result;

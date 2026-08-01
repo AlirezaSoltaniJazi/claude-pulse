@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import * as path from 'path';
+import {
+  DEFAULT_POLLING_INTERVAL_SEC,
+  DEFAULT_SESSION_RESET_MINUTES,
+  DEFAULT_SESSION_TOKEN_LIMIT,
+  DEFAULT_TASK_IDLE_SECONDS,
+  DEFAULT_USAGE_REFRESH_INTERVAL_SEC,
+  MIN_TASK_IDLE_SECONDS,
+  MIN_USAGE_REFRESH_INTERVAL_SEC,
+} from '../constants';
 
 export interface ClaudePulseConfig {
   statusBar: {
@@ -55,12 +64,18 @@ export class ConfigManager implements vscode.Disposable {
         showModel: cfg.get<boolean>('statusBar.showModel', true),
         showEffort: cfg.get<boolean>('statusBar.showEffort', true),
       },
-      sessionResetIntervalMinutes: cfg.get<number>('sessionResetIntervalMinutes', 300),
-      sessionTokenLimit: cfg.get<number>('sessionTokenLimit', 8_000_000),
-      pollingIntervalSeconds: cfg.get<number>('pollingIntervalSeconds', 30),
+      sessionResetIntervalMinutes: cfg.get<number>(
+        'sessionResetIntervalMinutes',
+        DEFAULT_SESSION_RESET_MINUTES
+      ),
+      sessionTokenLimit: cfg.get<number>('sessionTokenLimit', DEFAULT_SESSION_TOKEN_LIMIT),
+      pollingIntervalSeconds: cfg.get<number>(
+        'pollingIntervalSeconds',
+        DEFAULT_POLLING_INTERVAL_SEC
+      ),
       usageRefreshIntervalSeconds: Math.max(
-        cfg.get<number>('usageRefreshIntervalSeconds', 3600),
-        60
+        cfg.get<number>('usageRefreshIntervalSeconds', DEFAULT_USAGE_REFRESH_INTERVAL_SEC),
+        MIN_USAGE_REFRESH_INTERVAL_SEC
       ),
       notifications: {
         enabled: cfg.get<boolean>('notifications.enabled', false),
@@ -71,7 +86,10 @@ export class ConfigManager implements vscode.Disposable {
         onTaskComplete: cfg.get<boolean>('notifications.onTaskComplete', true),
         onApiRefresh: cfg.get<boolean>('notifications.onApiRefresh', true),
       },
-      taskCompletionIdleSeconds: Math.max(cfg.get<number>('taskCompletionIdleSeconds', 10), 5),
+      taskCompletionIdleSeconds: Math.max(
+        cfg.get<number>('taskCompletionIdleSeconds', DEFAULT_TASK_IDLE_SECONDS),
+        MIN_TASK_IDLE_SECONDS
+      ),
       claudeHomePath,
     };
   }

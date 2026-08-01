@@ -34,6 +34,7 @@ const makeConfig = (
 
 const makeModelInfo = (overrides: Partial<ModelInfo> = {}): ModelInfo => ({
   model: 'claude-opus-5',
+  modelSource: 'transcript',
   effort: 'xhigh',
   effortSource: 'transcript',
   isSessionLive: true,
@@ -69,7 +70,7 @@ describe('StatusBar model and effort segment', () => {
     expect(item().tooltip).toBe('Model: claude-opus-5 | Effort: xhigh');
   });
 
-  it('marks a settings-sourced effort as the global default in the tooltip', () => {
+  it('marks a settings-sourced effort as the global setting in the tooltip', () => {
     statusBar.update(
       makeConfig(),
       null,
@@ -78,7 +79,21 @@ describe('StatusBar model and effort segment', () => {
       makeModelInfo({ effort: 'high', effortSource: 'settings' })
     );
 
-    expect(item().tooltip).toBe('Model: claude-opus-5 | Effort: high (global default)');
+    expect(item().tooltip).toBe('Model: claude-opus-5 | Effort: high (global setting)');
+  });
+
+  it('does not mark a settings-sourced effort with ~ on a live session', () => {
+    // effortSource 'settings' is the norm for any record predating the per-turn field —
+    // marking it would change the bar for users who never switched anything.
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      null,
+      makeModelInfo({ effort: 'high', effortSource: 'settings' })
+    );
+
+    expect(item().text).toBe('$(pulse) $(sparkle) Opus 5 · high');
   });
 
   it('omits the model half when showModel is false', () => {
@@ -134,6 +149,53 @@ describe('StatusBar model and effort segment', () => {
     statusBar.update(makeConfig(), null, null, null, makeModelInfo({ isSessionLive: false }));
 
     expect(item().text).toBe('$(pulse) $(sparkle) ~Opus 5 · xhigh');
+  });
+
+  it('prefixes ~ for an unconfirmed global model selection', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      null,
+      makeModelInfo({ model: 'claude-fable-5[1m]', modelSource: 'settings' })
+    );
+
+    expect(item().text).toBe('$(pulse) $(sparkle) ~Fable 5 · xhigh');
+    expect(item().tooltip).toContain('(latest /model selection, unconfirmed)');
+  });
+
+  it('renders a bare alias selection without losing the segment', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      null,
+      makeModelInfo({ model: 'opus[1m]', modelSource: 'settings' })
+    );
+
+    expect(item().text).toBe('$(pulse) $(sparkle) ~Opus · xhigh');
+  });
+
+  it('leaves transcript- and command-sourced models unmarked', () => {
+    for (const modelSource of ['transcript', 'command'] as const) {
+      statusBar.update(makeConfig(), null, null, null, makeModelInfo({ modelSource }));
+
+      expect(item().text).toBe('$(pulse) $(sparkle) Opus 5 · xhigh');
+      expect(item().tooltip).toBe('Model: claude-opus-5 | Effort: xhigh');
+    }
+  });
+
+  it('omits the ~ entirely when showModel hides an unconfirmed selection', () => {
+    // No model on screen means nothing to qualify — a stray ~ on the effort would be noise.
+    statusBar.update(
+      makeConfig({ showModel: false }),
+      null,
+      null,
+      null,
+      makeModelInfo({ model: 'claude-fable-5[1m]', modelSource: 'settings' })
+    );
+
+    expect(item().text).toBe('$(pulse) $(sparkle) xhigh');
   });
 
   it('clears a previously rendered segment when modelInfo becomes null', () => {

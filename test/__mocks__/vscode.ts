@@ -61,6 +61,7 @@ const mockConfiguration = {
 export const workspace = {
   getConfiguration: vi.fn(() => mockConfiguration),
   onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+  onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
 };
 
