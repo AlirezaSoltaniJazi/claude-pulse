@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-01
+
 ### Added
 
 - **Model and effort level in the status bar** — see which model you are on and its reasoning effort at a glance,
@@ -220,3 +222,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VS Code in-app and OS-level system notifications (via node-notifier)
 - Configurable settings: polling intervals, notification preferences, session reset interval, custom Claude home path
 - Commands: Show Dashboard, Refresh Data, Reset Timer, Toggle Notifications
+
+[Unreleased]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v0.2.7...v0.3.0
