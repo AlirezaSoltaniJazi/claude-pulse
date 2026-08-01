@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from './config/configManager';
 import { readStats } from './data/statsReader';
-import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
+import {
+  readSessions,
+  getActiveSessions,
+  getMostRecentSession,
+  findSessionForWorkspace,
+} from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache } from './data/modelReader';
@@ -153,12 +158,25 @@ function startUsageRefreshInterval(intervalSeconds: number): void {
 /**
  * The single session the status bar describes. Shared by refreshData() and updateUI()
  * so the model never belongs to a different session than the reset timer.
+ *
+ * The session for THIS window's workspace wins. Without that, a user running Claude in
+ * several projects at once sees whichever session happened to be read first — which for
+ * the model is plainly wrong, since the model is chosen per session.
  */
 function pickPrimarySession(
   activeSessions: SessionFile[],
   mostRecentSession: SessionFile | null
 ): SessionFile | null {
-  return activeSessions.length > 0 ? activeSessions[0] : mostRecentSession;
+  const workspacePaths = (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath);
+
+  // Fall back to the most recently started session, not the first one off disk: with no
+  // workspace match (a folderless window, or Claude started outside the project) readdir
+  // order is arbitrary, and the newest session is the one the user most likely just used.
+  return (
+    findSessionForWorkspace(activeSessions, workspacePaths) ??
+    getMostRecentSession(activeSessions) ??
+    mostRecentSession
+  );
 }
 
 async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {

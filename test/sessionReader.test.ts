@@ -5,6 +5,7 @@ import {
   isProcessAlive,
   getActiveSessions,
   getMostRecentSession,
+  findSessionForWorkspace,
 } from '../src/data/sessionReader';
 import { SessionFile } from '../src/types';
 
@@ -148,5 +149,84 @@ describe('getMostRecentSession', () => {
   it('returns the only session when array has one element', () => {
     const session = makeSession({ sessionId: 'only' });
     expect(getMostRecentSession([session])).toEqual(session);
+  });
+});
+
+describe('findSessionForWorkspace', () => {
+  it('prefers the session matching the workspace over the first one on disk', () => {
+    const sessions = [
+      makeSession({ sessionId: 'other-project', cwd: '/home/user/other', startedAt: 100 }),
+      makeSession({ sessionId: 'mine', cwd: '/home/user/project', startedAt: 200 }),
+    ];
+
+    const result = findSessionForWorkspace(sessions, ['/home/user/project']);
+    expect(result?.sessionId).toBe('mine');
+  });
+
+  it('matches a session started in a subdirectory of the workspace', () => {
+    const sessions = [makeSession({ sessionId: 'nested', cwd: '/home/user/project/src/data' })];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])?.sessionId).toBe('nested');
+  });
+
+  it('prefers an exact match over a merely-contained one', () => {
+    const sessions = [
+      makeSession({ sessionId: 'nested', cwd: '/home/user/project/src', startedAt: 500 }),
+      makeSession({ sessionId: 'exact', cwd: '/home/user/project', startedAt: 100 }),
+    ];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])?.sessionId).toBe('exact');
+  });
+
+  it('picks the deepest workspace folder in a multi-root workspace', () => {
+    const sessions = [makeSession({ sessionId: 'deep', cwd: '/home/user/project/packages/app' })];
+
+    const result = findSessionForWorkspace(sessions, [
+      '/home/user/project',
+      '/home/user/project/packages/app',
+    ]);
+    expect(result?.sessionId).toBe('deep');
+  });
+
+  it('breaks ties toward the most recently started session', () => {
+    const sessions = [
+      makeSession({ sessionId: 'older', cwd: '/home/user/project', startedAt: 100 }),
+      makeSession({ sessionId: 'newer', cwd: '/home/user/project', startedAt: 900 }),
+      makeSession({ sessionId: 'middle', cwd: '/home/user/project', startedAt: 400 }),
+    ];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])?.sessionId).toBe('newer');
+  });
+
+  it('ignores a trailing separator on the workspace path', () => {
+    const sessions = [makeSession({ sessionId: 'mine', cwd: '/home/user/project' })];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project/'])?.sessionId).toBe('mine');
+  });
+
+  it('does not treat a sibling with a shared prefix as a match', () => {
+    const sessions = [makeSession({ sessionId: 'sibling', cwd: '/home/user/project-other' })];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])).toBeNull();
+  });
+
+  it('returns null when no session belongs to the workspace', () => {
+    const sessions = [makeSession({ cwd: '/home/user/elsewhere' })];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])).toBeNull();
+  });
+
+  it('returns null for empty sessions or empty workspace paths', () => {
+    expect(findSessionForWorkspace([], ['/home/user/project'])).toBeNull();
+    expect(findSessionForWorkspace([makeSession()], [])).toBeNull();
+  });
+
+  it('skips sessions with no cwd rather than throwing', () => {
+    const sessions = [
+      makeSession({ sessionId: 'no-cwd', cwd: undefined as unknown as string }),
+      makeSession({ sessionId: 'mine', cwd: '/home/user/project' }),
+    ];
+
+    expect(findSessionForWorkspace(sessions, ['/home/user/project'])?.sessionId).toBe('mine');
   });
 });

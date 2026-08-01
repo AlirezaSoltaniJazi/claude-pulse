@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `claudePulse.statusBar.showModel` and `claudePulse.statusBar.showEffort`. Set either to `false` to hide that
   half; set both to `false` to restore the previous status bar exactly. Only the tail of the transcript is read,
   so the cost does not grow with session length.
+- **Per-window session selection** — the status bar now describes the Claude session belonging to the window's
+  own workspace folder, matching on `cwd` (exact match preferred, then the deepest containing folder, ties broken
+  toward the most recently started session). Previously the first session found on disk was used, so anyone
+  running Claude in several projects at once saw another project's state — visible as the wrong model, since the
+  model is chosen per session. Windows with no folder open now fall back to the most recently started session
+  rather than an arbitrary one. This also makes the reset timer describe the same session as the model.
 
 ### Security
 
