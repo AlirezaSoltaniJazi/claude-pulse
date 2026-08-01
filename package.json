@@ -142,6 +142,8 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
+    "dev": "npm run build && node scripts/launch-dev.js",
+    "launch": "node scripts/launch-dev.js",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
