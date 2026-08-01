@@ -9,143 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Model and effort level in the status bar** — a new trailing segment shows the Claude model currently in use
-  and its reasoning effort level, e.g. `$(sparkle) Opus 5 · xhigh`. Both values come from the last assistant
-  record in the active session's transcript (`~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`); the effort
-  falls back to the global `effortLevel` in `~/.claude/settings.json` for models that predate the per-turn field,
-  which the tooltip marks as `(global setting)`. When the owning session's process is no longer alive the segment
-  is prefixed with `~`, matching the existing estimated-timer convention.
-  Controlled by two new settings, **both defaulting to `true`**, so the status bar gains this segment on upgrade:
-  `claudePulse.statusBar.showModel` and `claudePulse.statusBar.showEffort`. Set either to `false` to hide that
-  half; set both to `false` to restore the previous status bar exactly. Only the tail of the transcript is read,
-  so the cost does not grow with session length.
-- **Per-window session selection** — the status bar now describes the Claude session belonging to the window's
-  own workspace folder, matching on `cwd` (exact match preferred, then the deepest containing folder, ties broken
-  toward the most recently started session). Previously the first session found on disk was used, so anyone
-  running Claude in several projects at once saw another project's state — visible as the wrong model, since the
-  model is chosen per session. Windows with no folder open now fall back to the most recently started session
-  rather than an arbitrary one. This also makes the reset timer describe the same session as the model.
-- **Real-time model and effort updates** — running `/model` now updates the status bar in roughly a quarter of a
-  second instead of waiting out the polling interval (30s by default). `FileWatcher` gained two events:
-  `onModelSettingsChanged`, fired when `~/.claude/settings.json` changes, and `onTranscriptChanged`, fired when
-  the primary session's transcript is appended to. Both are debounced by 250ms and guarded by an mtime/size
-  check, which also stops the transcript read from re-triggering its own watcher. `settings.json` is watched via
-  the **directory** plus a 2s mtime poll rather than a file-level watch. Claude Code currently rewrites it in
-  place (verified: the inode and birthtime survive a rewrite), so a file watch would work today — but it also
-  writes other files atomically (`plugins/blocklist.json` leaves `<name>.<hex>.tmp` siblings), and a file watch
-  goes permanently dead after the first temp+rename. Watching the directory is correct under both regimes.
-  Measured end to end against a copy of the real
-  `~/.claude/settings.json`: 266ms for an atomic rewrite, 267ms for an in-place rewrite, 255ms for a transcript
-  append.
-  These events run a targeted refresh that re-reads only the model, **not** the full `refreshData()` — that one
-  walks every project directory and would be far too heavy to run on every transcript append.
-- **Opportunistic usage refresh** — usage is now also refreshed when a task completes, rather than only on the
-  hourly timer, subject to a global 2-minute floor and a 15-minute stand-down after a rate limit. Usage is a
-  server-side percentage, so it cannot be made truly real-time; local estimation is deliberately not attempted.
+- **Model and effort level in the status bar** — see which model you are on and its reasoning effort at a glance,
+  e.g. `Opus 5 · xhigh`. Hide either half with the new `claudePulse.statusBar.showModel` and
+  `claudePulse.statusBar.showEffort` settings.
+- **Each window now follows its own project.** If you run Claude in several projects at once, every window shows
+  that project's session — its model and its reset timer — instead of whichever session was found first.
+- **`/model` shows up immediately**, in about a quarter of a second, rather than after the next refresh.
+- **Usage updates when a task finishes**, not only once an hour, so the percentage is current when you look at it.
+- **"API data refreshed" pop-ups can be turned off** with `claudePulse.notifications.onApiRefresh`. Errors and
+  warnings are always shown.
 
 ### Security
 
-- Regenerated `package-lock.json`, clearing 8 advisories (7 high, 1 moderate) in transitive dev dependencies:
-  `brace-expansion`, `fast-uri`, `form-data`, `js-yaml`, `linkify-it`, `markdown-it` and `undici`
-  (all via `@vscode/vsce`), plus `postcss` (via `vitest` → `vite`). `npm audit` and `npm audit --omit=dev`
-  both report 0 vulnerabilities. No production dependency was ever affected.
+- Cleared 8 advisories in build-time dependencies. Nothing shipped inside the extension was ever affected.
 
 ### Fixed
 
-- **Release packaging** — `vsce package` refused to run because `@types/vscode` (`^1.120.0`) exceeded
-  `engines.vscode` (`^1.85.0`), which vsce treats as a hard error. Pinned `@types/vscode` to `~1.85.0` to match
-  the declared engine. The extension's newest API use is `StatusBarItem.backgroundColor` (VS Code 1.53), so no
-  functionality is lost and no user on an older VS Code is dropped.
-- **Type checking** — `tsc --noEmit` failed with 56 `Cannot find name` errors for Node globals (`fs`, `process`,
-  `setInterval`, …). TypeScript 6 defaults `moduleResolution` to `bundler`, which does not auto-include `@types`.
-  Added `"types": ["node", "vscode"]` to `tsconfig.json`. Not caught by CI, which builds with esbuild only.
-- **CI matrix** — the Node 18 leg could no longer install, since vitest 4 and eslint 10 require
-  Node `^20.19 || ^22.13 || >=24`. Matrix moved to Node 20 and 22, and `fail-fast: false` added so legs report
-  independently rather than being cancelled. Because CI can therefore no longer exercise the runtime of the
-  oldest supported editor (`engines.vscode` `^1.85.0` ships Electron 25 / Node 18), the esbuild `target` is now
-  pinned to `node18` — the bundle is made downlevel-safe at build time rather than by a test matrix.
-- **Packaged extension contained development files** — `.vscodeignore` did not exclude `scripts/`, `*.vsix`,
-  `.DS_Store` or the `.vscode-dev/` profile that `npm run dev` creates (a full VS Code user-data-dir plus
-  extensions dir, routinely hundreds of MB). `.gitignore` covered `.vscode-dev/`, but **vsce reads
-  `.vscodeignore` and never falls back to `.gitignore` when it exists**, so those entries had no effect on the
-  package. A stray `old_pub.md` was shipping in the published `.vsix` as a result. The package is now exactly
-  the manifest, README, LICENSE, CHANGELOG, `media/`, `dist/extension.js` and `node-notifier`.
-- **Model and effort could freeze for the rest of a session** — the transcript watch was a bare file-level
-  `fs.watch` with no polling fallback, contrary to the rule applied to `stats-cache.json` and `settings.json`.
-  A rewrite or compaction that replaces the inode kills that watch silently, and because `watchTranscript()` is
-  idempotent by path it would never re-arm. Nothing else re-reads the transcript on a timer — `refreshData()` is
-  purely event-driven — so the status bar would keep showing a stale model indefinitely. The transcript now
-  shares the 2s mtime+size poll with `settings.json`, and arming adopts the file's current state as its baseline
-  so a re-target is no longer misreported as a change.
-- **Watchers ignored `claudePulse.claudeHomePath` changes** — the path was captured at construction, so after
-  the setting changed the extension read the new location but only ever reacted to events from the old one, while
-  continuing to serve the old root's cached model and weekly scan. `FileWatcher.updateClaudeHomePath()` now
-  re-points every watcher and poll, and the config handler clears the scan and model caches and forces a refresh.
-- **Model info could revert to a stale value** — `refreshData()` and the transcript-driven `refreshModelInfo()`
-  both write `cachedData.modelInfo`, and the former resolves it alongside a weekly scan that can take seconds.
-  An append landing inside that window was overwritten by the older read. Both writers now claim a sequence
-  token and discard their own result if superseded.
-- **Transcript tail read trusted a stale `stat`** — `bytesRead` was discarded, so a file that shrank between the
-  `stat` and the read left NUL padding in the buffer; those lines failed `JSON.parse` and were skipped, degrading
-  to "no evidence" during exactly the rewrite the fallback exists for.
-- **The model disappeared from the status bar while Claude was working** — the transcript read used a fixed
-  256 KB widening ceiling, but a single tool-result line is routinely far larger: across the 113 local
-  transcripts over 200 KB, the largest single line measures **846 KB**. Mid-turn that line sits *after* the last
-  assistant record, pushing it out of every window, so the model resolved to `null` for the duration of the turn
-  — precisely when the status bar is being watched. Two changes fix it: the cold read now widens through
-  64 KB → 256 KB → 1 MB → 4 MB, and subsequent reads are **incremental** — only the bytes appended since the last
-  scan are examined, and evidence already proven is retained, since an append cannot invalidate an earlier
-  record. That also makes the common path cheaper: cost is proportional to the bytes added rather than to the
-  size of the transcript, which matters at the 32 MB transcripts present locally.
-  The reason this surfaced as *"the model only disappears in `default` mode"* is that `settings.json` was
-  masking it. An explicit selection such as `"model": "opus[1m]"` gives `resolveModelSelection` a fallback, so
-  the bar still showed `Opus`; `/model default` writes the literal `"default"`, which names no model and is
-  correctly rejected, leaving the transcript as the only source — and it was failing. Effort survived either way
-  because it falls back to the global `effortLevel`, which is why the segment rendered as a bare `xhigh`.
-  The read cursor now also stops at the last **complete** line, so a record caught mid-write is re-read whole on
-  the next pass instead of being consumed as garbage and skipped permanently.
-- **Task-completion notifications reported the wrong directory** — the cwd was decoded back out of the project
-  directory name, but that encoding maps both `/` and `.` to `-` and cannot be inverted:
-  `-Users-me-projects-claude-pulse` decoded to `/Users/me/projects/claude/pulse`. The cwd is now taken from the
-  session file, which carries it verbatim.
-- **GitHub Releases had no `.vsix` attached** — the release workflow ran `vsce publish`, which builds into a temp
-  directory, then attached `files: '*.vsix'`, which matched nothing. `softprops/action-gh-release` warns and
-  continues on an unmatched glob, so every release silently shipped without its artifact. The workflow now runs
-  `vsce package` explicitly, attaches that file with `fail_on_unmatched_files: true`, and publishes the same
-  artifact via `--packagePath` so the Marketplace and the GitHub Release are byte-identical.
-- The `~` marker in the status bar now binds to what it describes. An unconfirmed global `/model` selection
-  marks only the model, leaving a transcript-proven effort clean; a dead session still marks the whole segment.
+- **The model name vanished from the status bar while Claude was working**, leaving just the effort level. Most
+  visible if you use `/model default`, which had nothing to fall back on to hide it.
+- **The model and effort could stay stuck on an old value** for the rest of a session.
+- **The status bar could briefly flip back to an out-of-date model** after a refresh.
+- **Changing `claudePulse.claudeHomePath` did nothing** until the window was reloaded.
+- **Task-completion notifications showed a broken project path** when the folder name contained a hyphen —
+  `claude-pulse` was reported as `claude/pulse`.
+- **The published extension included development files** that should never have shipped.
+- **GitHub Releases were published without the `.vsix` file attached.**
+- The `~` "not confirmed yet" marker now applies only to the value it actually describes.
 
 ### Changed
 
-- **Release process** — releases are now cut by labelling a PR `release:patch`, `release:minor` or
-  `release:major` and merging it, or by running the Release workflow manually (with a `current` option that
-  releases without bumping) — matching the pipeline already used by the sibling extension projects. The workflow
-  bumps `package.json` and `package-lock.json`, promotes the CHANGELOG's `[Unreleased]` section to a dated
-  heading with compare links, and takes the GitHub Release notes from that promoted section instead of a
-  generated commit list. Guards: merged-not-just-closed, non-fork, never Dependabot, a `release` concurrency
-  group, and a hard failure if the tag already exists. The full gate (`lint`, `format:check`, `typecheck`,
-  `build`, `test`) runs before anything is written. New `pr-version-check.yml` fails any PR whose version goes
-  backwards. New `scripts/bump-version.mjs` and `scripts/changelog.mjs`; new `typecheck`, `package` and
-  `bump:*` npm scripts. `npm run release` no longer publishes — it builds and packages locally, so publishing
-  has exactly one path.
-- `lint`, `format` and `format:check` now cover `scripts/` as well as `src/` and `test/`; ESLint gained flat
-  config blocks for CommonJS and ESM scripts. `scripts/launch-dev.js` was previously unchecked by either tool.
-
-- Bump `@types/node` from 25.9.3 to 26.1.2
-- Bump `@typescript-eslint/eslint-plugin` from 8.61.0 to 8.65.0
-- Bump `@typescript-eslint/parser` from 8.61.0 to 8.65.0
-- Bump `@vitest/coverage-v8` from 4.1.8 to 4.1.10
-- Bump `esbuild` from 0.28.0 to 0.28.1
-- Bump `eslint` from 10.5.0 to 10.8.0
-- Bump `lint-staged` from 16.4.0 to 17.3.0 — raises the floor for the pre-commit hook to Node >= 22.22.1
-  (developer machines only; never runs in CI)
-- Bump `prettier` from 3.8.4 to 3.9.6 (no formatting drift — `format:check` passes unchanged)
-- Bump `vitest` from 4.1.8 to 4.1.10
-- Pin `@types/vscode` from `^1.120.0` down to `~1.85.0`, and add a Dependabot ignore rule so it is only raised
-  deliberately alongside `engines.vscode`
-- Held `typescript` at 6.0.3 — TypeScript 7 is the native Go port and ships no JavaScript compiler API, which
-  `@typescript-eslint` 8.65.0 rejects at both install (`ERESOLVE`, peer range `>=4.8.4 <6.1.0`) and lint time
+- Releases are now cut by labelling a pull request `release:patch`, `release:minor` or `release:major` and
+  merging it. Release notes come from this changelog.
+- Updated development dependencies and build tooling. VS Code 1.85 and above is still supported.
 
 ## [0.2.7] - 2026-04-04
 
