@@ -8,13 +8,13 @@ VS Code extension that monitors Claude Code usage, sessions, and token consumpti
 
 | Component | Technology |
 |-----------|-----------|
-| Language | TypeScript 5.3 (strict mode) |
+| Language | TypeScript 6.0 (strict mode) |
 | Platform | VS Code Extension API (^1.85.0) |
 | Build | esbuild (CJS output for Node.js) |
 | Tests | Vitest (node environment, globals enabled) |
 | Lint | ESLint + @typescript-eslint + Prettier |
 | Git hooks | Husky + lint-staged (pre-commit) |
-| CI/CD | GitHub Actions (lint, test, build on Node 18 & 20) |
+| CI/CD | GitHub Actions (lint, test, build on Node 20 & 22) |
 | Runtime dep | node-notifier (optional, system notifications) |
 
 ## Project Structure
@@ -29,9 +29,11 @@ src/
 ├── data/
 │   ├── statsReader.ts        # Reads ~/.claude/stats-cache.json
 │   ├── sessionReader.ts      # Reads ~/.claude/sessions/*.json, detects active PIDs
+│   ├── modelReader.ts        # Reads active model + reasoning effort from session transcript / global settings
 │   ├── usageApi.ts           # Anthropic OAuth API client (retry, cache, credentials)
 │   ├── fileWatcher.ts        # Hybrid: FSWatch + polling for ~/.claude/ changes
 │   ├── jsonlScanner.ts       # Scans JSONL session logs for weekly token counts
+│   ├── taskCompletionDetector.ts # Idle-timeout detection for task-complete notifications
 │   └── dataAggregator.ts     # Aggregates daily activity from StatsCache
 ├── notifications/
 │   ├── sessionMonitor.ts     # PID liveness detection for session tracking
@@ -47,9 +49,13 @@ test/
 ├── __mocks__/vscode.ts       # Manual VS Code API mock
 ├── configManager.test.ts
 ├── dataAggregator.test.ts
+├── fileWatcher.test.ts
 ├── formatting.test.ts
+├── modelReader.test.ts
 ├── sessionReader.test.ts
-└── statsReader.test.ts
+├── statsReader.test.ts
+├── statusBar.test.ts
+└── taskCompletionDetector.test.ts
 ```
 
 ## How To Run
@@ -64,7 +70,7 @@ npm run watch          # then F5 in VS Code to launch Extension Host
 # Production build
 npm run build
 
-# Tests (74 tests)
+# Tests (213 tests)
 npm test
 npm run test:coverage
 
@@ -142,7 +148,7 @@ Five patterns used consistently:
 | `src/ui/webviewContent.ts` | Dashboard HTML generation (largest file, inline JS/CSS) |
 | `package.json` | Extension manifest: commands, settings schema, activation |
 | `test/__mocks__/vscode.ts` | VS Code API mock — modify when testing new APIs |
-| `esbuild.js` | Build config — single entry, CJS output, external: vscode |
+| `esbuild.js` | Build config — single entry, CJS output, external: vscode, node-notifier |
 
 ## Files To Never Touch
 
@@ -210,7 +216,7 @@ describe('MyModule', () => {
 - **Framework**: Vitest (globals enabled — no manual imports needed)
 - **Mock**: Manual VS Code mock in `test/__mocks__/vscode.ts` (aliased via vitest.config.ts)
 - **Coverage excluded**: `src/ui/webviewContent.ts` (HTML generation)
-- **Run**: `npm test` (74 tests) or `npm run test:coverage`
+- **Run**: `npm test` (213 tests) or `npm run test:coverage`
 - **Pattern**: Setup mock state → call function → assert result → dispose
 
 ## Known Gotchas

@@ -53,7 +53,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 Or install from the command line:
 
 ```bash
-code --install-extension AlirezaSoltaniJazi.claude-pulse
+code --install-extension AlirezaSoltaniJazi.claude-pulse-monitor
 ```
 
 ## Requirements
@@ -76,13 +76,15 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
 | `sessionTokenLimit` | number | `8000000` | Estimated token limit per session window (for usage % calculation) |
 | `pollingIntervalSeconds` | number | `30` | How often to check Claude files for changes (min: 5) |
-| `usageRefreshIntervalSeconds` | number | `60` | How often to refresh from the Anthropic API (min: 60) |
+| `usageRefreshIntervalSeconds` | number | `3600` | How often to refresh from the Anthropic API (min: 60) |
 | `notifications.enabled` | boolean | `false` | Enable notifications for Claude events |
 | `notifications.useSystemNotifications` | boolean | `false` | Use OS-level desktop notifications |
 | `notifications.onNewSession` | boolean | `true` | Notify when a new Claude session starts |
 | `notifications.onSessionEnd` | boolean | `true` | Notify when a Claude session ends |
 | `notifications.onResetTimerComplete` | boolean | `true` | Notify when the session reset timer reaches zero |
+| `notifications.onTaskComplete` | boolean | `true` | Notify when Claude finishes a task and is waiting for input |
 | `notifications.onApiRefresh` | boolean | `true` | Show a confirmation toast when API usage data is manually refreshed (errors are always shown) |
+| `taskCompletionIdleSeconds` | number | `10` | Seconds of inactivity after Claude's last response before considering a task complete |
 | `claudeHomePath` | string | `""` | Custom path to .claude directory (leave empty for `~/.claude`) |
 
 ## Commands
@@ -131,7 +133,7 @@ After setup, you'll receive macOS notification banners for:
 
 ## Known Limitations
 
-- OAuth credential reading is currently supported on macOS (Keychain) and Linux (file-based). Windows support is not yet implemented.
+- OAuth credential reading uses the macOS Keychain, with a file-based fallback (`~/.claude/.credentials.json`) on Linux and Windows.
 - The extension reads stats written by Claude Code CLI — if the CLI changes its file format, stats parsing may need updates.
 - Usage API data depends on having a valid OAuth session with Claude Code.
 
@@ -152,7 +154,7 @@ npm run watch    # Build in watch mode
 # Quality checks
 npm run lint     # ESLint
 npm run format:check  # Prettier
-npm test         # Vitest (66 tests)
+npm test         # Vitest (213 tests)
 npm run build    # Production build
 ```
 
