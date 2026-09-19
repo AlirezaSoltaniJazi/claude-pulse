@@ -1,4 +1,4 @@
-import { StatsCache, WeeklyUsageSummary, DailyActivity } from '../types';
+import { ModelTokenBreakdown, StatsCache, WeeklyUsageSummary, DailyActivity } from '../types';
 import { getCurrentWeekBounds } from '../utils/dateUtils';
 
 export function getWeeklyUsage(stats: StatsCache): WeeklyUsageSummary {
@@ -9,12 +9,23 @@ export function getWeeklyUsage(stats: StatsCache): WeeklyUsageSummary {
   const weekTokens = stats.dailyModelTokens.filter((d) => d.date >= weekStart && d.date <= weekEnd);
 
   const tokensByModel: Record<string, number> = {};
+  // dailyModelTokens carries one total per model per day, never the four-way split, so this
+  // path can only ever fill totalTokens. The JSONL scanner is what produces a real breakdown.
+  const modelBreakdown: Record<string, ModelTokenBreakdown> = {};
   let totalTokens = 0;
   let sonnetTokens = 0;
 
   for (const day of weekTokens) {
     for (const [model, tokens] of Object.entries(day.tokensByModel)) {
       tokensByModel[model] = (tokensByModel[model] ?? 0) + tokens;
+      const current = modelBreakdown[model];
+      modelBreakdown[model] = {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+        totalTokens: (current?.totalTokens ?? 0) + tokens,
+      };
       totalTokens += tokens;
       if (model.toLowerCase().includes('sonnet')) {
         sonnetTokens += tokens;
@@ -29,6 +40,8 @@ export function getWeeklyUsage(stats: StatsCache): WeeklyUsageSummary {
     totalSessions: weekActivity.reduce((sum, d) => sum + d.sessionCount, 0),
     totalToolCalls: weekActivity.reduce((sum, d) => sum + d.toolCallCount, 0),
     tokensByModel,
+    modelBreakdown,
+    hourCounts: { ...stats.hourCounts },
     totalTokens,
     sonnetTokens,
   };

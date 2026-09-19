@@ -6,13 +6,29 @@ import {
   SessionFile,
   WeeklyUsageSummary,
 } from '../types';
-import { formatDurationShort, formatNumber } from '../utils/formatting';
+import { formatDurationShort, formatModelName, formatNumber } from '../utils/formatting';
+import { limitLabel, resolveLimits } from '../utils/usageLimits';
 import {
   USAGE_TIER_LOW,
   USAGE_TIER_MEDIUM,
   USAGE_TIER_HIGH,
   USAGE_TIER_CRITICAL,
 } from '../constants';
+
+/**
+ * Escapes text interpolated into the dashboard's HTML.
+ *
+ * Model ids come from transcript files and window labels come from the API, so neither is
+ * ours to trust: '<synthetic>' alone is enough to swallow the rest of a row as a bogus tag.
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 function usageColor(pct: number): string {
   if (pct >= USAGE_TIER_CRITICAL) return 'var(--error)';
@@ -409,7 +425,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       <div class="grid">
         ${renderWeeklyCard(data.weeklyUsage)}
         ${renderSonnetCard(data.weeklyUsage)}
-        ${renderModelBreakdownCard(data)}
+        ${renderModelBreakdownCard(data.weeklyUsage)}
       </div>
     </div>
   </div>
@@ -421,7 +437,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     </div>
     <div class="section-content" id="content-activity">
       <div class="grid">
-        ${renderHourlyCard(data)}
+        ${renderHourlyCard(data.weeklyUsage)}
       </div>
     </div>
   </div>
@@ -437,22 +453,16 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
     </div>`;
   }
 
-  const windows = [
-    { label: 'Current Session (5h)', data: usage.five_hour },
-    { label: 'This Week (All Models)', data: usage.seven_day },
-    { label: 'This Week (Sonnet)', data: usage.seven_day_sonnet },
-    { label: 'This Week (Opus)', data: usage.seven_day_opus },
-  ];
-
-  const bars = windows
-    .filter((w) => w.data !== null)
-    .map((w) => {
-      const pct = Math.round(w.data!.utilization);
+  // Whatever windows the API reported, labelled by the API. A model-scoped limit such as
+  // 'This Week (Fable)' appears here on its own, and so will the next one.
+  const bars = resolveLimits(usage)
+    .map((limit) => {
+      const pct = Math.round(limit.percent);
       const color = usageColor(pct);
-      const resetStr = w.data!.resets_at ? formatResetTime(w.data!.resets_at) : '';
+      const resetStr = limit.resets_at ? formatResetTime(limit.resets_at) : '';
       return `<div class="usage-bar">
         <div class="usage-bar-header">
-          <span class="stat-label">${w.label}</span>
+          <span class="stat-label">${escapeHtml(limitLabel(limit))}</span>
           <span class="stat-value">${pct}%</span>
         </div>
         <div class="usage-bar-track">
@@ -791,23 +801,38 @@ function renderLifetimeCard(data: ClaudePulseData): string {
   </div>`;
 }
 
-function renderModelBreakdownCard(data: ClaudePulseData): string {
-  if (!data.stats || Object.keys(data.stats.modelUsage).length === 0) {
+/**
+ * Per-model token table for the current week.
+ *
+ * Reads the JSONL scan, not `stats-cache.json`: Claude Code stopped writing the `modelUsage`
+ * the old implementation depended on, which left this card permanently empty. The transcripts
+ * are the only source that still reports per-model tokens, and they report every model —
+ * so a model with a handful of turns shows up instead of vanishing into the total.
+ */
+function renderModelBreakdownCard(weekly: WeeklyUsageSummary | null): string {
+  const models = weekly ? Object.entries(weekly.modelBreakdown) : [];
+  if (!weekly || models.length === 0) {
     return `<div class="card full-width">
       <h2>Token Breakdown by Model</h2>
       <p class="no-data">No model usage data</p>
     </div>`;
   }
 
-  const rows = Object.entries(data.stats.modelUsage)
-    .map(([model, usage]: [string, ModelUsage]) => {
-      const shortName = model.replace('claude-', '').replace(/-\d{8}$/, '');
+  const total = weekly.totalTokens;
+  const rows = models
+    .sort((a, b) => b[1].totalTokens - a[1].totalTokens)
+    .map(([model, usage]) => {
+      // formatModelName falls back to the raw id, so an id it cannot parse still names itself.
+      const label = formatModelName(model) || model;
+      const share = total > 0 ? ((usage.totalTokens / total) * 100).toFixed(1) : '0.0';
       return `<tr>
-        <td>${shortName}</td>
+        <td>${escapeHtml(label)}</td>
         <td>${formatNumber(usage.inputTokens)}</td>
         <td>${formatNumber(usage.outputTokens)}</td>
         <td>${formatNumber(usage.cacheReadInputTokens)}</td>
         <td>${formatNumber(usage.cacheCreationInputTokens)}</td>
+        <td>${formatNumber(usage.totalTokens)}</td>
+        <td>${share}%</td>
       </tr>`;
     })
     .join('');
@@ -822,6 +847,8 @@ function renderModelBreakdownCard(data: ClaudePulseData): string {
           <th>Output</th>
           <th>Cache Read</th>
           <th>Cache Create</th>
+          <th>Total</th>
+          <th>% of Week</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -829,15 +856,16 @@ function renderModelBreakdownCard(data: ClaudePulseData): string {
   </div>`;
 }
 
-function renderHourlyCard(data: ClaudePulseData): string {
-  if (!data.stats || Object.keys(data.stats.hourCounts).length === 0) {
+/** Same story as the breakdown card: the hour histogram now comes from the weekly scan. */
+function renderHourlyCard(weekly: WeeklyUsageSummary | null): string {
+  if (!weekly || Object.keys(weekly.hourCounts).length === 0) {
     return `<div class="card full-width">
       <h2>Activity by Hour</h2>
       <p class="no-data">No hourly data</p>
     </div>`;
   }
 
-  const counts = data.stats.hourCounts;
+  const counts = weekly.hourCounts;
   const maxCount = Math.max(...Object.values(counts).map(Number));
 
   const bars = Array.from({ length: 24 }, (_, h) => {

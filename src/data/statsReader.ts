@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClaudeUsage, StatsCache } from '../types';
+import { normalizeUsage } from '../utils/usageLimits';
 
 export async function readStats(claudeHomePath: string): Promise<StatsCache | null> {
   const statsPath = path.join(claudeHomePath, 'stats-cache.json');
@@ -27,11 +28,9 @@ export async function readUsageFromCache(claudeHomePath: string): Promise<Claude
     const content = await fs.promises.readFile(statsPath, 'utf-8');
     const data = JSON.parse(content);
 
-    if (data.usage) {
-      return data.usage as ClaudeUsage;
-    }
-
-    return null;
+    // Normalized, not cast: this file is written by Claude Code and can lag the live API
+    // shape, so it gets the same lenient read the network response does.
+    return normalizeUsage(data.usage);
   } catch {
     return null;
   }

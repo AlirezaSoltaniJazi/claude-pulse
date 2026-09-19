@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { WeeklyUsageSummary } from '../types';
+import { ModelTokenBreakdown, WeeklyUsageSummary } from '../types';
 import { getCurrentWeekBounds } from '../utils/dateUtils';
-import { SCAN_CACHE_TTL_MS } from '../constants';
+import { SCAN_CACHE_TTL_MS, SYNTHETIC_MODEL_ID } from '../constants';
 
 interface ScanCache {
   data: WeeklyUsageSummary;
@@ -39,6 +39,8 @@ export async function scanWeeklyUsage(
     let totalTokens = 0;
     let sonnetTokens = 0;
     const tokensByModel: Record<string, number> = {};
+    const modelBreakdown: Record<string, ModelTokenBreakdown> = {};
+    const hourCounts: Record<string, number> = {};
     const sessionIds = new Set<string>();
 
     const weekStartMs = weekStartDate.getTime();
@@ -75,12 +77,17 @@ export async function scanWeeklyUsage(
             totalMessages += result.messageCount;
             totalToolCalls += result.toolCallCount;
 
-            for (const [model, tokens] of Object.entries(result.tokensByModel)) {
-              tokensByModel[model] = (tokensByModel[model] ?? 0) + tokens;
-              totalTokens += tokens;
+            for (const [model, breakdown] of Object.entries(result.modelBreakdown)) {
+              addBreakdown(modelBreakdown, model, breakdown);
+              tokensByModel[model] = (tokensByModel[model] ?? 0) + breakdown.totalTokens;
+              totalTokens += breakdown.totalTokens;
               if (model.toLowerCase().includes('sonnet')) {
-                sonnetTokens += tokens;
+                sonnetTokens += breakdown.totalTokens;
               }
+            }
+
+            for (const [hour, count] of Object.entries(result.hourCounts)) {
+              hourCounts[hour] = (hourCounts[hour] ?? 0) + count;
             }
           }
         } catch (_e) {
@@ -96,6 +103,8 @@ export async function scanWeeklyUsage(
       totalSessions: sessionIds.size,
       totalToolCalls,
       tokensByModel,
+      modelBreakdown,
+      hourCounts,
       totalTokens,
       sonnetTokens,
     };
@@ -114,7 +123,32 @@ export function clearScanCache(): void {
 interface FileScanResult {
   messageCount: number;
   toolCallCount: number;
-  tokensByModel: Record<string, number>;
+  modelBreakdown: Record<string, ModelTokenBreakdown>;
+  hourCounts: Record<string, number>;
+}
+
+const EMPTY_BREAKDOWN: ModelTokenBreakdown = {
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadInputTokens: 0,
+  cacheCreationInputTokens: 0,
+  totalTokens: 0,
+};
+
+/** Folds one model's counts into an accumulator, creating the entry on first sight. */
+function addBreakdown(
+  target: Record<string, ModelTokenBreakdown>,
+  model: string,
+  add: ModelTokenBreakdown
+): void {
+  const current = target[model] ?? { ...EMPTY_BREAKDOWN };
+  target[model] = {
+    inputTokens: current.inputTokens + add.inputTokens,
+    outputTokens: current.outputTokens + add.outputTokens,
+    cacheReadInputTokens: current.cacheReadInputTokens + add.cacheReadInputTokens,
+    cacheCreationInputTokens: current.cacheCreationInputTokens + add.cacheCreationInputTokens,
+    totalTokens: current.totalTokens + add.totalTokens,
+  };
 }
 
 async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<FileScanResult> {
@@ -123,7 +157,8 @@ async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<Fi
 
   let messageCount = 0;
   let toolCallCount = 0;
-  const tokensByModel: Record<string, number> = {};
+  const modelBreakdown: Record<string, ModelTokenBreakdown> = {};
+  const hourCounts: Record<string, number> = {};
 
   for (const line of lines) {
     if (!line) continue;
@@ -132,24 +167,41 @@ async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<Fi
       const event = JSON.parse(line);
 
       // Check timestamp is within current week
+      let eventDate: Date | null = null;
       if (event.timestamp) {
-        const eventDate = new Date(event.timestamp);
+        eventDate = new Date(event.timestamp);
         if (eventDate < weekStartDate) continue;
+        if (Number.isNaN(eventDate.getTime())) eventDate = null;
       }
 
       if (event.type === 'assistant' && event.message) {
         const msg = event.message;
         messageCount++;
 
+        // Local hour, not UTC: the histogram answers 'when do I work', a question about the
+        // wall clock in front of the user.
+        if (eventDate) {
+          const hour = eventDate.getHours().toString();
+          hourCounts[hour] = (hourCounts[hour] ?? 0) + 1;
+        }
+
+        // '<synthetic>' marks injected interrupt/API-error placeholders — it is not a model,
+        // and listing it as one in the breakdown table would be noise.
         const model = msg.model ?? 'unknown';
-        const usage = msg.usage;
+        const usage = model === SYNTHETIC_MODEL_ID ? null : msg.usage;
         if (usage) {
-          const tokens =
-            (usage.input_tokens ?? 0) +
-            (usage.output_tokens ?? 0) +
-            (usage.cache_read_input_tokens ?? 0) +
-            (usage.cache_creation_input_tokens ?? 0);
-          tokensByModel[model] = (tokensByModel[model] ?? 0) + tokens;
+          const inputTokens = usage.input_tokens ?? 0;
+          const outputTokens = usage.output_tokens ?? 0;
+          const cacheReadInputTokens = usage.cache_read_input_tokens ?? 0;
+          const cacheCreationInputTokens = usage.cache_creation_input_tokens ?? 0;
+          addBreakdown(modelBreakdown, model, {
+            inputTokens,
+            outputTokens,
+            cacheReadInputTokens,
+            cacheCreationInputTokens,
+            totalTokens:
+              inputTokens + outputTokens + cacheReadInputTokens + cacheCreationInputTokens,
+          });
         }
 
         // Count tool uses in content
@@ -170,5 +222,5 @@ async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<Fi
     }
   }
 
-  return { messageCount, toolCallCount, tokensByModel };
+  return { messageCount, toolCallCount, modelBreakdown, hourCounts };
 }

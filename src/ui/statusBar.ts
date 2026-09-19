@@ -8,6 +8,12 @@ import {
   formatNumber,
 } from '../utils/formatting';
 import {
+  limitShortLabel,
+  pickDisplayLimit,
+  pickMaxLimit,
+  resolveLimits,
+} from '../utils/usageLimits';
+import {
   USAGE_TIER_HIGH,
   USAGE_TIER_CRITICAL,
   STATUS_BAR_TICK_MS,
@@ -61,70 +67,58 @@ export class StatusBar implements vscode.Disposable {
     const parts: string[] = ['$(pulse)'];
     const tooltipParts: string[] = [];
 
-    // Usage percentage — show max across all windows
-    if (this.usage) {
-      const windows = [
-        { label: '5h', data: this.usage.five_hour },
-        { label: '7d', data: this.usage.seven_day },
-        { label: '7d Sonnet', data: this.usage.seven_day_sonnet },
-        { label: '7d Opus', data: this.usage.seven_day_opus },
-      ].filter((w): w is { label: string; data: NonNullable<typeof w.data> } => w.data !== null);
+    // Usage percentage — every window the API named, whatever it named them.
+    const limits = resolveLimits(this.usage);
+    const displayLimit = pickDisplayLimit(limits);
+    const maxLimit = pickMaxLimit(limits);
 
-      if (windows.length > 0) {
-        const maxWindow = windows.reduce(
-          (max, w) => (w.data.utilization > max.data.utilization ? w : max),
-          windows[0]
+    if (displayLimit && maxLimit) {
+      const pct = Math.round(displayLimit.percent);
+      const maxPct = Math.round(maxLimit.percent);
+      parts.push(`${pct}%`);
+
+      // Show all windows in tooltip — this is where a model-scoped limit ('7d Fable')
+      // becomes visible without stealing the bar's single number slot.
+      for (const l of limits) {
+        tooltipParts.push(`${limitShortLabel(l)}: ${Math.round(l.percent)}%`);
+      }
+
+      // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
+      if (maxPct >= USAGE_TIER_CRITICAL) {
+        this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      } else if (maxPct >= USAGE_TIER_HIGH) {
+        this.statusBarItem.backgroundColor = new vscode.ThemeColor(
+          'statusBarItem.warningBackground'
         );
-        const displayWindow = windows.find((w) => w.label === '5h') ?? maxWindow;
-        const pct = Math.round(displayWindow.data.utilization);
-        const maxPct = Math.round(maxWindow.data.utilization);
-        parts.push(`${pct}%`);
-
-        // Show all windows in tooltip
-        for (const w of windows) {
-          tooltipParts.push(`${w.label}: ${Math.round(w.data.utilization)}%`);
-        }
-
-        // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
-        if (maxPct >= USAGE_TIER_CRITICAL) {
-          this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-            'statusBarItem.errorBackground'
-          );
-        } else if (maxPct >= USAGE_TIER_HIGH) {
-          this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-            'statusBarItem.warningBackground'
-          );
-        } else {
-          this.statusBarItem.backgroundColor = undefined;
-        }
-
-        // Reset timer — matches the displayed window (5h preferred, max fallback)
-        if (this.config.statusBar.showResetTimer) {
-          const resetsAt = displayWindow.data.resets_at;
-
-          if (resetsAt) {
-            const resetsAtMs = new Date(resetsAt).getTime();
-            const remaining = resetsAtMs - Date.now();
-
-            if (remaining > 0) {
-              const resetDate = new Date(resetsAtMs);
-              const hh = resetDate.getHours().toString().padStart(2, '0');
-              const mm = resetDate.getMinutes().toString().padStart(2, '0');
-              parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
-              tooltipParts.push(`Resets at ${hh}:${mm}`);
-            } else {
-              parts.push('Ready');
-              tooltipParts.push('Session reset');
-            }
-          }
-        }
       } else {
         this.statusBarItem.backgroundColor = undefined;
+      }
+
+      // Reset timer — matches the displayed window (session preferred, max fallback)
+      if (this.config.statusBar.showResetTimer) {
+        const resetsAt = displayLimit.resets_at;
+
+        if (resetsAt) {
+          const resetsAtMs = new Date(resetsAt).getTime();
+          const remaining = resetsAtMs - Date.now();
+
+          if (remaining > 0) {
+            const resetDate = new Date(resetsAtMs);
+            const hh = resetDate.getHours().toString().padStart(2, '0');
+            const mm = resetDate.getMinutes().toString().padStart(2, '0');
+            parts.push(`${formatDuration(remaining)} (${hh}:${mm})`);
+            tooltipParts.push(`Resets at ${hh}:${mm}`);
+          } else {
+            parts.push('Ready');
+            tooltipParts.push('Session reset');
+          }
+        }
       }
     } else {
       this.statusBarItem.backgroundColor = undefined;
 
-      // Fallback reset timer when no API data
+      // No usable window — either no API data at all, or a response whose windows were all
+      // null. Both mean the same thing to the user, so both get the estimated timer.
       if (this.config.statusBar.showResetTimer) {
         if (this.currentSession) {
           const resetMs = this.config.sessionResetIntervalMinutes * 60 * 1000;
