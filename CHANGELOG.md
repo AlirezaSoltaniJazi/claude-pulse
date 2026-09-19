@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   models, and the dashboard and status bar tooltip show each one — `This Week (Fable)` alongside the session
   and all-models bars. Nothing is hardcoded to a model name: whatever windows the API reports are the windows
   you see, so a model introduced next month appears without an update.
+- **Model-specific usage in the status bar.** Once a model-scoped weekly limit registers above 0%, it appears
+  at the end of the bar with its own reset countdown — `Fable 2% 4d 5h`. These windows are sub-caps *within*
+  the overall weekly limit, not separate budgets, so the usage is also counted in the all-models percentage.
+  Turn it off with `claudePulse.statusBar.showScopedUsage`.
 - **Agents section in the dashboard.** Lists the subagents the current session spawned, dearest first, with the
   task, agent type, model, turns, duration and tokens for each. Subagents are invisible from the main
   transcript — one tool call in, no sign that it cost 60k tokens — yet routinely account for most of a

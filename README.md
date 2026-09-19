@@ -76,6 +76,7 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `statusBar.showModel` | boolean | `true` | Show the Claude model currently in use (e.g. `Opus 5`) in status bar |
 | `statusBar.showEffort` | boolean | `true` | Show the model's reasoning effort level (e.g. `xhigh`) in status bar |
 | `statusBar.showCacheWarmth` | boolean | `false` | Show an approximate prompt-cache countdown (e.g. `~59m`) in status bar |
+| `statusBar.showScopedUsage` | boolean | `true` | Show model-specific weekly usage once above 0% (e.g. `Fable 2% 4d 5h`) |
 | `showAgentMap` | boolean | `true` | Show the Agents section listing the subagents this session spawned |
 | `promptCacheTtlMinutes` | number | `60` | Assumed prompt-cache lifetime in minutes (1–1440) |
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
