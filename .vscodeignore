@@ -29,6 +29,7 @@ package-lock.json
 .idea/**
 .opencode/**
 PUBLISHING.md
+RELEASE.md
 INJECT.md
 agents.md
 
@@ -40,7 +41,6 @@ agents.md
 scripts/**
 
 # Local scratch and build output that would otherwise be packaged verbatim.
-old_pub.md
 *.vsix
 .DS_Store
 **/.DS_Store

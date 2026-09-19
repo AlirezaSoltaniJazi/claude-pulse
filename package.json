@@ -50,7 +50,7 @@
         "claudePulse.statusBar.showTokenCount": {
           "type": "boolean",
           "default": false,
-          "description": "Show today's token count in status bar"
+          "description": "Show today's message count in status bar"
         },
         "claudePulse.statusBar.showSessionCount": {
           "type": "boolean",

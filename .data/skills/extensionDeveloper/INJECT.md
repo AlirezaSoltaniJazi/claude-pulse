@@ -4,31 +4,30 @@
 
 ## Critical Rules
 
-1. **Manifest V3 only** — no persistent background pages, no `webRequest` blocking, no remotely hosted code
-2. **Service worker is ephemeral** — never store state in globals; use `chrome.storage.session` for recovery
-3. **Typed messages** — every `sendMessage`/`onMessage` uses discriminated union types from `types.ts`
-4. **Return `true` from async `onMessage`** — or message channel closes before `sendResponse` fires
-5. **Least-privilege permissions** — `activeTab` over `tabs`; justify every permission for Chrome Web Store
-6. **No `eval`/`new Function`** — CSP forbids it in MV3; no `unsafe-eval` in policy
-7. **Shadow DOM for content script UI** — never inject styles/elements into page global scope
-8. **Error handling** — catch all exceptions in handlers; return null, never throw
-9. **esbuild bundling** — separate entry point per context (service worker, content script, popup)
-10. **TypeScript strict mode** — no `any`, explicit return types, strict null checks
+1. **This is a VS Code extension** — `vscode.*` APIs and `package.json` contribution points, not `chrome.*`/`manifest.json`/service workers
+2. **Extension host is long-lived** — `activate(context)` runs once per window on `onStartupFinished`; there is no ephemeral wake/terminate cycle to design around
+3. **Config lives in two places** — every setting must exist in BOTH `package.json` `contributes.configuration` AND `ConfigManager.getConfig()` with matching defaults
+4. **Disposables go through `context.subscriptions`** — every class implementing `vscode.Disposable` must be pushed there in `activate()`
+5. **Data readers never throw** — functions under `src/data/` return `null`/`[]` on failure; `extension.ts` treats that as "no data yet"
+6. **Module-level caches need a clear function** — any `let cache` at module scope pairs with an exported `clearXCache()` (see `usageApi.ts`, `modelReader.ts`, `jsonlScanner.ts`)
+7. **UI never does I/O** — `statusBar.ts` and `webviewContent.ts` only render `cachedData`; all file/network access lives in `src/data/`
+8. **Webview ↔ extension messaging** — webview calls `acquireVsCodeApi().postMessage({ command: ... })`; `DashboardPanel` handles it via `panel.webview.onDidReceiveMessage`; the extension pushes updates by reassigning `panel.webview.html`, not by posting incremental patches
+9. **esbuild bundling** — single entry `src/extension.ts` → `dist/extension.js`, CJS, `external: ['vscode', 'node-notifier']`
+10. **TypeScript strict mode** — no `any` (warn-level lint), explicit function signatures, `strict: true` in `tsconfig.json`
 
 ## Project Conventions (from claude-pulse)
 
-- camelCase functions/variables, PascalCase classes, SCREAMING_SNAKE_CASE constants
-- Silent error handling — return null on failure, never throw from data fetchers
-- In-memory caches with explicit TTL constants and `clearCache()` methods
-- ES modules source → CommonJS/ESM output via esbuild
-- Vitest for testing (mock `chrome.*` with `vi.fn()`)
-- ESLint with `@typescript-eslint` — warn on `any`, warn on unused vars (except `_` prefix)
+- camelCase functions/variables (verb-first), PascalCase classes/interfaces, SCREAMING_SNAKE_CASE constants
+- Null/empty-return error handling in data readers — never throw; `usageApi.ts` instead returns a `{ data, status, message }` result object
+- Module-level caches with explicit TTL constants (in `constants.ts`) and exported `clearCache()`-style functions
+- `require('node-notifier')` is a deliberate dynamic import (lazy-loaded only when system notifications are enabled) — do not make it static
+- Vitest for testing; `vscode` is aliased to `test/__mocks__/vscode.ts` (a manual mock, not auto-mocked)
+- ESLint with `@typescript-eslint` — `eqeqeq` and `no-throw-literal` are errors; `no-explicit-any` and unused vars (except `_`-prefixed) are warnings
 
 ## Do NOT Hallucinate
 
-- `chrome.webRequest.onBeforeRequest` with `blocking` — **removed in MV3**, use `declarativeNetRequest`
-- `chrome.browserAction` — **removed in MV3**, use `chrome.action`
-- `chrome.extension.getBackgroundPage()` — **removed in MV3**, use message passing
-- `chrome.tabs.executeScript()` — **removed in MV3**, use `chrome.scripting.executeScript()`
-- Persistent background pages — **MV3 uses service workers only**
-- `manifest_version: 2` — **deprecated, do not generate**
+- `manifest.json`, `chrome.*` APIs, service workers, content scripts, popup/options pages — **none of this exists in claude-pulse**; it is a VS Code extension
+- A `jsDeveloper` skill, or any other skill covering VS Code extension work — **this skill covers it**; there is nothing to defer
+- Chrome Web Store review/CSP/permissions concepts — the equivalent concerns here are the VS Code Marketplace (see `PUBLISHING.md`) and the checklist in `references/security-checklist.md`
+- A `background/service-worker.ts` file, `popup/`, `options/`, or `sidepanel/` directories — the real UI surfaces are `src/ui/statusBar.ts` and `src/ui/webviewPanel.ts` + `webviewContent.ts`
+- Fine-grained webview → extension incremental DOM patching over `postMessage` — the actual pattern re-renders the whole dashboard via `generateDashboardHtml()` on every update

@@ -10,6 +10,7 @@ Claude Pulse gives you real-time visibility into your Claude Code activity — u
 
 - Live usage percentage (max across 5-hour and 7-day windows)
 - Session reset countdown timer (from API or estimated)
+- Current model and reasoning effort level (e.g. `Opus 5 · xhigh`), each shown/hidden independently
 - Optional message count and session count display
 - Five-tier color-coded usage: blue (<25%), green (25-49%), amber (50-69%), orange (70-89%), red (90%+)
 
@@ -23,7 +24,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - **Session info** — Active session PID, working directory, duration, and reset time
 - **Weekly summary** — Total tokens, messages, sessions, and tool calls for the current week
 - **Sonnet breakdown** — Sonnet token usage and percentage of total
-- **Lifetime stats** — Total sessions, messages, first session date, longest session
+- **Lifetime stats** — Total tokens, favorite model, total sessions and messages, first session date, longest session, active-day streaks, and most active day
 - **Model breakdown** — Token usage table by model (input, output, cache read, cache create)
 - **Hourly activity chart** — Visual bar chart of activity distribution by hour
 
@@ -32,6 +33,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 ### Real-Time Monitoring
 
 - File watching on `~/.claude/` for stats and session changes
+- Per-window session matching — each VS Code window follows the Claude session for its own workspace folder, so running Claude in several projects at once never mixes them up
 - PID liveness detection for active session tracking
 - Notifications on session start, session end, and reset timer completion
 - Optional OS-level system notifications (via node-notifier)
@@ -41,7 +43,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - Fetches live usage data from the Anthropic API using your existing OAuth credentials
 - Reads credentials from macOS Keychain or `~/.claude/.credentials.json`
 - Retry logic with exponential backoff and rate-limit handling
-- Configurable refresh interval (minimum 60 seconds)
+- Configurable refresh interval (minimum 60 seconds), plus an opportunistic refresh right after Claude finishes a task so the percentage is current when you look at it
 
 ## Installation
 
@@ -150,6 +152,7 @@ npm install
 # Development
 npm run watch    # Build in watch mode
 # Press F5 in VS Code to launch Extension Development Host
+npm run dev      # or: build once + launch Extension Development Host directly (no F5 needed)
 
 # Quality checks
 npm run lint     # ESLint

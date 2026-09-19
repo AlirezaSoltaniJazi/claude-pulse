@@ -3,193 +3,213 @@
 ## Naming Conventions
 
 ```typescript
-// Classes — PascalCase
-class StorageManager { }
-class MessageRouter { }
-class ContentInjector { }
+// Classes — PascalCase (real examples from src/)
+class ConfigManager { }
+class StatusBar { }
+class FileWatcher { }
+class DashboardPanel { }
+class TaskCompletionDetector { }
 
-// Functions and variables — camelCase
-function handleMessage() { }
-const activeTabId = 42;
-let isEnabled = true;
+// Functions and variables — camelCase, verb-first for functions
+async function readStats(claudeHomePath: string) { }
+function getActiveSessions(sessions: SessionFile[]) { }
+let cachedData: ClaudePulseData;
 
-// Constants — SCREAMING_SNAKE_CASE
-const STORAGE_KEY = 'settings';
-const CACHE_TTL_MS = 30_000;
-const MAX_RETRY_COUNT = 3;
-const MESSAGE_TYPES = {
-  FETCH_DATA: 'FETCH_DATA',
-  UPDATE_UI: 'UPDATE_UI',
-} as const;
+// Constants — SCREAMING_SNAKE_CASE (from constants.ts)
+export const USAGE_CACHE_TTL_MS = 30_000;
+export const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+export const MODEL_INFO_CACHE_TTL_MS = 10_000;
 
-// Private fields — underscore prefix
-class Manager {
-  private _cache: Map<string, unknown> = new Map();
-  private _listeners: Set<() => void> = new Set();
+// Interfaces — PascalCase, no "I" prefix
+export interface ClaudePulseConfig { /* ... */ }
+export interface SessionFile { pid: number; sessionId: string; cwd: string; startedAt: number; }
+export interface ModelInfo { model: string | null; modelSource: ModelSource | null; /* ... */ }
+
+// Private EventEmitters — underscore prefix, public event re-exported without it
+export class ConfigManager implements vscode.Disposable {
+  private readonly _onConfigChanged = new vscode.EventEmitter<ClaudePulseConfig>();
+  readonly onConfigChanged = this._onConfigChanged.event;
+  // ...
 }
 
-// Type aliases — PascalCase
-type MessageType = 'FETCH_DATA' | 'UPDATE_UI';
-interface StorageData { key: string; value: unknown; }
-
-// Enum-like objects — PascalCase const
-const Permission = {
-  Storage: 'storage',
-  ActiveTab: 'activeTab',
-  Alarms: 'alarms',
-} as const;
+// Booleans — is/has/should/use prefix
+function isProcessAlive(pid: number): boolean { /* ... */ }
+// config field: notifications.useSystemNotifications
 ```
 
 ## Import Order
 
 ```typescript
-// 1. Chrome types (ambient, no import needed)
+// 1. Node.js built-ins and vscode — star import
+import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
-// 2. Node built-ins (if applicable in build tooling)
+// 2. Local modules — named imports
+import { ConfigManager } from './config/configManager';
+import { readStats } from './data/statsReader';
+import { readSessions, getActiveSessions, getMostRecentSession } from './data/sessionReader';
 
-// 3. Third-party packages
-import { z } from 'zod';
-
-// 4. Project shared modules
-import type { ContentMessage, MessageResponse } from '../types';
-import { getStorage, setStorage } from '../shared/storage';
-import { sendTypedMessage } from '../shared/messages';
-
-// 5. Local module imports
-import { renderCard } from './components/card';
+// 3. Types — same style as named imports, no separate `import type` convention in src/
+import { ClaudePulseData, SessionFile } from './types';
+import { MIN_USAGE_REFRESH_INTERVAL_SEC } from './constants';
 ```
 
 ## Function Signatures
 
 ```typescript
 // Always annotate parameters and return types
-async function fetchData(url: string, options?: FetchOptions): Promise<MessageResponse<Data>> {
+export async function readModelInfo(
+  claudeHomePath: string,
+  session: SessionFile | null,
+  isSessionLive: boolean
+): Promise<ModelInfo | null> {
   // ...
 }
 
-// Arrow functions for callbacks
-const handleClick = (event: MouseEvent): void => {
-  // ...
+// Avoid `any` — use `unknown` + narrowing, then a defensive cast after validation
+const record = JSON.parse(line) as {
+  type?: unknown;
+  message?: { model?: unknown; content?: unknown };
 };
-
-// Avoid `any` — use `unknown` + narrowing
-function parseMessage(raw: unknown): ContentMessage | null {
-  if (!raw || typeof raw !== 'object') return null;
-  if (!('type' in raw)) return null;
-  return raw as ContentMessage; // After validation
-}
+if (typeof record.message?.model !== 'string') continue;
 ```
 
 ## Error Handling
 
+Three patterns are used consistently across the codebase:
+
 ```typescript
-// Data fetchers — return null, never throw
-async function readFromStorage(key: string): Promise<StorageData | null> {
+// 1. Data readers — return null/[] on failure, NEVER throw
+export async function readStats(claudeHomePath: string): Promise<StatsCache | null> {
   try {
-    const result = await chrome.storage.local.get(key);
-    return result[key] ?? null;
+    const content = await fs.promises.readFile(statsPath, 'utf-8');
+    // ...
+    return data as StatsCache;
   } catch {
     return null;
   }
 }
 
-// Message handlers — return error response, never throw
-async function handleMessage(message: ContentMessage): Promise<MessageResponse> {
-  try {
-    switch (message.type) {
-      case 'FETCH_DATA':
-        const data = await fetchData(message.payload.url);
-        return { success: true, data };
-      default:
-        return { success: false, error: `Unknown message type` };
+// 2. Status-result objects — used where the caller needs to distinguish failure modes
+export interface FetchUsageResult {
+  data: ClaudeUsage | null;
+  status: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'error' | 'no_credentials';
+  message: string;
+}
+
+// 3. Logged warnings — non-fatal, prefixed so they're greppable in the Output panel
+console.warn(
+  `Claude Pulse: Failed to read model info: ${e instanceof Error ? e.message : String(e)}`
+);
+```
+
+User-facing errors go through `vscode.window.showErrorMessage` / `showWarningMessage` / `showInformationMessage` — see `extension.ts`'s `showRefreshFeedback()`. File watching uses a fourth, silent-catch pattern for directories that may not exist yet (e.g. `~/.claude/sessions` before the first Claude Code session runs).
+
+## Typed Configuration Access
+
+```typescript
+// config/configManager.ts — every setting read with an explicit default matching package.json
+export class ConfigManager implements vscode.Disposable {
+  private readonly _onConfigChanged = new vscode.EventEmitter<ClaudePulseConfig>();
+  readonly onConfigChanged = this._onConfigChanged.event;
+  private disposable: vscode.Disposable;
+
+  constructor() {
+    this.disposable = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('claudePulse')) {
+        this._onConfigChanged.fire(this.getConfig());
+      }
+    });
+  }
+
+  getConfig(): ClaudePulseConfig {
+    const cfg = vscode.workspace.getConfiguration('claudePulse');
+    return {
+      pollingIntervalSeconds: cfg.get<number>('pollingIntervalSeconds', DEFAULT_POLLING_INTERVAL_SEC),
+      // ... one cfg.get<T>(key, default) per setting, default MUST match package.json
+    };
+  }
+
+  dispose(): void {
+    this.disposable.dispose();
+    this._onConfigChanged.dispose();
+  }
+}
+```
+
+## Disposable Pattern
+
+```typescript
+// Every class that holds a timer, watcher, or EventEmitter implements vscode.Disposable
+export class SessionMonitor implements vscode.Disposable {
+  private readonly _onSessionStarted = new vscode.EventEmitter<SessionFile>();
+  readonly onSessionStarted = this._onSessionStarted.event;
+  private livenessInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    this.livenessInterval = setInterval(() => this.checkLiveness(), LIVENESS_CHECK_INTERVAL_MS);
+  }
+
+  dispose(): void {
+    if (this.livenessInterval) {
+      clearInterval(this.livenessInterval);
+      this.livenessInterval = null;
     }
-  } catch (error) {
-    return { success: false, error: String(error) };
+    this._onSessionStarted.dispose();
   }
 }
+
+// In extension.ts's activate(): every disposable instance is registered once
+context.subscriptions.push(configManager, fileWatcher, statusBar, dashboardPanel, sessionMonitor, /* ... */);
 ```
 
-## Chrome Storage Typed Wrappers
+## Module-Level Cache Pattern
 
 ```typescript
-// shared/storage.ts — Typed storage access
+// data/usageApi.ts — module-scope cache + explicit invalidation, not a class instance
+interface UsageCache { data: ClaudeUsage; timestamp: number; }
+let cache: UsageCache | null = null;
 
-interface StorageSchema {
-  settings: { theme: 'light' | 'dark'; enabled: boolean };
-  cache: { data: unknown; timestamp: number };
-  version: string;
-}
-
-async function getStorage<K extends keyof StorageSchema>(
-  key: K
-): Promise<StorageSchema[K] | null> {
-  try {
-    const result = await chrome.storage.local.get(key);
-    return (result[key] as StorageSchema[K]) ?? null;
-  } catch {
-    return null;
+export async function fetchUsage(forceRefresh = false): Promise<FetchUsageResult> {
+  if (!forceRefresh && cache && Date.now() - cache.timestamp < USAGE_CACHE_TTL_MS) {
+    return { data: cache.data, status: 'cached', message: 'Using cached data' };
   }
+  // ... fetch, then `cache = { data, timestamp: Date.now() }`
 }
 
-async function setStorage<K extends keyof StorageSchema>(
-  key: K,
-  value: StorageSchema[K]
-): Promise<boolean> {
-  try {
-    await chrome.storage.local.set({ [key]: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
-```
-
-## Content Script Shadow DOM Pattern
-
-```typescript
-// content-script.ts — Isolated UI injection
-
-function injectUI(): void {
-  const host = document.createElement('div');
-  host.id = 'my-extension-root';
-  const shadow = host.attachShadow({ mode: 'closed' });
-
-  // Styles scoped to shadow DOM
-  const style = document.createElement('style');
-  style.textContent = `
-    .container { position: fixed; bottom: 16px; right: 16px; z-index: 999999; }
-    .panel { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
-  `;
-
-  const container = document.createElement('div');
-  container.className = 'container';
-  container.innerHTML = `<div class="panel">Extension UI</div>`;
-
-  shadow.appendChild(style);
-  shadow.appendChild(container);
-  document.body.appendChild(host);
+export function clearUsageCache(): void {
+  cache = null;
 }
 ```
 
 ## File Organization
 
-```
+```text
 src/
-├── background/
-│   └── service-worker.ts      # Single entry — event registration + handlers
-├── content/
-│   ├── content-script.ts      # DOM interaction, shadow DOM UI
-│   └── page-observer.ts       # MutationObserver patterns
-├── popup/
-│   ├── popup.html             # Minimal HTML shell
-│   ├── popup.ts               # Popup logic
-│   └── popup.css              # Popup styles
-├── options/
-│   ├── options.html
-│   ├── options.ts
-│   └── options.css
-├── shared/
-│   ├── storage.ts             # Typed chrome.storage wrappers
-│   └── messages.ts            # Typed message helpers
-└── types.ts                   # All shared type definitions
+├── extension.ts                # activate()/deactivate(), refresh orchestration, cachedData
+├── types.ts                    # All shared interfaces
+├── constants.ts                # TTLs, thresholds, API endpoints, defaults
+├── config/
+│   └── configManager.ts        # ClaudePulseConfig — settings read + change events
+├── data/
+│   ├── statsReader.ts
+│   ├── sessionReader.ts
+│   ├── modelReader.ts
+│   ├── usageApi.ts
+│   ├── fileWatcher.ts
+│   ├── jsonlScanner.ts
+│   ├── taskCompletionDetector.ts
+│   └── dataAggregator.ts
+├── notifications/
+│   ├── sessionMonitor.ts
+│   └── notificationManager.ts
+├── ui/
+│   ├── statusBar.ts
+│   ├── webviewPanel.ts
+│   └── webviewContent.ts       # Largest file — inline HTML/CSS/JS, excluded from coverage
+└── utils/
+    ├── formatting.ts
+    └── dateUtils.ts
 ```
