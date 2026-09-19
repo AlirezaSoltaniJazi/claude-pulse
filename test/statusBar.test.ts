@@ -258,7 +258,7 @@ describe('StatusBar model-scoped usage segment', () => {
   });
 
   it('renders the scoped percentage and its reset at the end of the bar', () => {
-    const weeklyReset = new Date(Date.now() + (4 * 24 + 5) * 3_600_000).toISOString();
+    const weeklyReset = new Date(Date.now() + (4 * 24 + 5) * 3_600_000 + 60_000).toISOString();
     // The three windows a live response actually carries: the bar leads with the session,
     // and the scoped window rides at the tail rather than competing for the headline.
     statusBar.update(
@@ -326,7 +326,7 @@ describe('StatusBar model-scoped usage segment', () => {
   });
 
   it('puts the scoped window in the tooltip with its reset', () => {
-    const resets = new Date(Date.now() + 2 * 24 * 3_600_000).toISOString();
+    const resets = new Date(Date.now() + 2 * 24 * 3_600_000 + 60_000).toISOString();
     statusBar.update(
       makeConfig(),
       null,
