@@ -20,6 +20,7 @@ import {
   USAGE_TIER_CRITICAL,
   STATUS_BAR_TICK_MS,
   MODEL_EFFORT_SEPARATOR,
+  STATUS_BAR_SEGMENT_SEPARATOR,
 } from '../constants';
 
 export class StatusBar implements vscode.Disposable {
@@ -219,11 +220,20 @@ export class StatusBar implements vscode.Disposable {
     // Gated on the ROUNDED percentage rather than the raw one — a window at 0.4% would
     // otherwise render as 'Fable 0%', which reads as a bug rather than as barely-used.
     if (this.config.statusBar.showScopedUsage) {
+      // The divider is pushed once, before the first scoped window, and only when something
+      // precedes it — a bar that opens '$(pulse) | Fable 2%' has nothing to divide from.
+      let dividerPushed = false;
+
       for (const limit of limits) {
         if (!limit.modelLabel) continue;
 
         const pct = Math.round(limit.percent);
         if (pct <= 0) continue;
+
+        if (!dividerPushed && parts.length > 1) {
+          parts.push(STATUS_BAR_SEGMENT_SEPARATOR);
+          dividerPushed = true;
+        }
 
         const remaining = limit.resets_at ? new Date(limit.resets_at).getTime() - Date.now() : 0;
         const resetLabel = remaining > 0 ? ` ${formatDurationDays(remaining)}` : '';

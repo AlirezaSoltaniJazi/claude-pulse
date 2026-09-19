@@ -273,7 +273,7 @@ describe('StatusBar model-scoped usage segment', () => {
       makeModelInfo()
     );
 
-    expect(item().text).toBe('$(pulse) 34% $(sparkle) Opus 5 · xhigh Fable 2% 4d 5h');
+    expect(item().text).toBe('$(pulse) 34% $(sparkle) Opus 5 · xhigh | Fable 2% 4d 5h');
   });
 
   it('names the model the API scoped the window to, whatever that is', () => {
@@ -285,7 +285,7 @@ describe('StatusBar model-scoped usage segment', () => {
       null
     );
 
-    expect(item().text).toContain('Nimbus 7%');
+    expect(item().text).toContain('| Nimbus 7%');
   });
 
   it('omits a window that rounds to 0%, which would read as a bug rather than as unused', () => {
@@ -336,5 +336,65 @@ describe('StatusBar model-scoped usage segment', () => {
     );
 
     expect(item().tooltip).toContain('Fable: 2% — resets in 2d');
+  });
+});
+
+describe('StatusBar scoped usage divider', () => {
+  let statusBar: StatusBar;
+
+  const item = (): { text: string; tooltip: string } =>
+    vi.mocked(vscode.window.createStatusBarItem).mock.results[0].value;
+
+  beforeEach(() => {
+    vi.mocked(vscode.window.createStatusBarItem).mockClear();
+    statusBar = new StatusBar();
+  });
+
+  afterEach(() => {
+    statusBar.dispose();
+  });
+
+  it('separates the scoped window from the effort it would otherwise run into', () => {
+    statusBar.update(
+      makeConfig({ showModel: false }),
+      null,
+      null,
+      makeUsage([
+        makeLimit({ kind: 'session', group: 'session', percent: 36, modelLabel: null }),
+        makeLimit({ percent: 2 }),
+      ]),
+      makeModelInfo({ effort: 'medium' })
+    );
+
+    // 'med Fable 2%' reads as one phrase; the divider is what stops that.
+    expect(item().text).toBe('$(pulse) 36% $(sparkle) med | Fable 2%');
+  });
+
+  it('adds no divider when there is no scoped window to divide', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([makeLimit({ kind: 'weekly_all', modelLabel: null, percent: 42 })]),
+      makeModelInfo()
+    );
+
+    expect(item().text).not.toContain('|');
+  });
+
+  it('pushes one divider, not one per scoped window', () => {
+    statusBar.update(
+      makeConfig({ showModel: false, showEffort: false }),
+      null,
+      null,
+      makeUsage([
+        makeLimit({ kind: 'session', group: 'session', percent: 36, modelLabel: null }),
+        makeLimit({ percent: 2 }),
+        makeLimit({ modelLabel: 'Nimbus', percent: 3 }),
+      ]),
+      null
+    );
+
+    expect(item().text).toBe('$(pulse) 36% | Fable 2% Nimbus 3%');
   });
 });

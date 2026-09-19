@@ -61,6 +61,14 @@ export const MODEL_COMMAND_STDOUT_PATTERN =
   /<local-command-stdout>\s*Set model to\s+([^<]+?)\s*<\/local-command-stdout>/;
 /** U+00B7 MIDDLE DOT — escaped to keep the source ASCII-only. */
 export const MODEL_EFFORT_SEPARATOR = ' \u00B7 ';
+/**
+ * Divider before the model-scoped usage segment.
+ *
+ * Pushed as its own part so the join adds a space either side. It exists only to stop the
+ * scoped window reading as a continuation of the model/effort segment that precedes it —
+ * 'med Fable 2%' parses as one phrase, 'med | Fable 2%' does not.
+ */
+export const STATUS_BAR_SEGMENT_SEPARATOR = '|';
 
 // File Watcher
 /**
