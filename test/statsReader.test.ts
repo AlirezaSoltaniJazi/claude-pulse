@@ -68,7 +68,7 @@ describe('readStats', () => {
 describe('readUsageFromCache', () => {
   it('returns ClaudeUsage when JSON has a usage field', async () => {
     const usage = {
-      five_hour: { percent_used: 50, reset_time: '2026-03-28T12:00:00Z' },
+      five_hour: { utilization: 50, resets_at: '2026-03-28T12:00:00Z' },
       seven_day: null,
       seven_day_sonnet: null,
       seven_day_opus: null,
@@ -78,8 +78,40 @@ describe('readUsageFromCache', () => {
 
     const result = await readUsageFromCache(FAKE_HOME);
 
-    expect(result).toEqual(usage);
+    expect(result).toEqual({ ...usage, limits: [] });
     expect(mockReadFile).toHaveBeenCalledWith(`${FAKE_HOME}/stats-cache.json`, 'utf-8');
+  });
+
+  it('drops a window whose fields it does not recognise', async () => {
+    // The pre-normalizer implementation cast the cache straight to ClaudeUsage, so a stale
+    // shape like this reached the UI and rendered as NaN%.
+    const usage = { five_hour: { percent_used: 50, reset_time: '2026-03-28T12:00:00Z' } };
+    mockReadFile.mockResolvedValue(JSON.stringify({ usage }));
+
+    const result = await readUsageFromCache(FAKE_HOME);
+
+    expect(result?.five_hour).toBeNull();
+  });
+
+  it('reads the limits array when the cache carries one', async () => {
+    const usage = {
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 2,
+          resets_at: null,
+          scope: { model: { display_name: 'Fable' } },
+        },
+      ],
+    };
+    mockReadFile.mockResolvedValue(JSON.stringify({ usage }));
+
+    const result = await readUsageFromCache(FAKE_HOME);
+
+    expect(result?.limits).toEqual([
+      { kind: 'weekly_scoped', group: 'weekly', percent: 2, resets_at: null, modelLabel: 'Fable' },
+    ]);
   });
 
   it('returns null when JSON has no usage field', async () => {

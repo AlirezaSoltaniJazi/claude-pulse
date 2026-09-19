@@ -1,37 +1,21 @@
 {
-  "manifest_version": 3,
-  "name": "Extension Name",
-  "version": "1.0.0",
-  "description": "Brief description of your extension",
-  "permissions": [
-    "storage",
-    "activeTab"
-  ],
-  "optional_permissions": [
-    "notifications"
-  ],
-  "host_permissions": [],
-  "background": {
-    "service_worker": "dist/service-worker.js",
-    "type": "module"
-  },
-  "action": {
-    "default_popup": "popup/popup.html",
-    "default_title": "Extension Name",
-    "default_icon": {
-      "16": "assets/icon-16.png",
-      "48": "assets/icon-48.png",
-      "128": "assets/icon-128.png"
+  "_comment": "VS Code extensions have no manifest.json. This is a copy-paste template for the `contributes` block of THIS project's package.json — see the real package.json at the project root for the full manifest (engines.vscode, activationEvents, main, and the complete contributes.commands / contributes.configuration lists). Delete this _comment key before pasting.",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudePulse.newCommand",
+        "title": "Claude Pulse: New Command"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Pulse",
+      "properties": {
+        "claudePulse.newSetting": {
+          "type": "boolean",
+          "default": false,
+          "description": "Description of the new setting"
+        }
+      }
     }
-  },
-  "icons": {
-    "16": "assets/icon-16.png",
-    "48": "assets/icon-48.png",
-    "128": "assets/icon-128.png"
-  },
-  "content_scripts": [],
-  "web_accessible_resources": [],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
   }
 }

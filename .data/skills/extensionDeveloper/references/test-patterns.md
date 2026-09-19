@@ -1,250 +1,151 @@
-# Test Patterns for Chrome Extensions
+# Test Patterns for This VS Code Extension
 
-## Chrome API Mocking Setup
+## `vscode` Module Mocking Setup
 
-```typescript
-// test/setup.ts — Global chrome mock
-import { vi } from 'vitest';
-
-const chromeMock = {
-  runtime: {
-    id: 'test-extension-id',
-    sendMessage: vi.fn(),
-    onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
-    onInstalled: { addListener: vi.fn() },
-    onConnect: { addListener: vi.fn() },
-    connect: vi.fn(),
-    getManifest: vi.fn(() => ({ version: '1.0.0' })),
-    getContexts: vi.fn(async () => []),
-  },
-  storage: {
-    local: {
-      get: vi.fn(async () => ({})),
-      set: vi.fn(async () => undefined),
-      remove: vi.fn(async () => undefined),
-      getBytesInUse: vi.fn(async () => 0),
-    },
-    session: {
-      get: vi.fn(async () => ({})),
-      set: vi.fn(async () => undefined),
-    },
-    onChanged: { addListener: vi.fn() },
-  },
-  tabs: {
-    query: vi.fn(async () => []),
-    sendMessage: vi.fn(async () => undefined),
-    create: vi.fn(async () => ({ id: 1 })),
-    update: vi.fn(async () => ({})),
-  },
-  action: {
-    setBadgeText: vi.fn(async () => undefined),
-    setBadgeBackgroundColor: vi.fn(async () => undefined),
-    onClicked: { addListener: vi.fn() },
-  },
-  alarms: {
-    create: vi.fn(),
-    get: vi.fn(async () => null),
-    onAlarm: { addListener: vi.fn() },
-  },
-  contextMenus: {
-    create: vi.fn(),
-    removeAll: vi.fn(async () => undefined),
-    onClicked: { addListener: vi.fn() },
-  },
-  scripting: {
-    executeScript: vi.fn(async () => []),
-  },
-};
-
-// Assign to global
-Object.assign(globalThis, { chrome: chromeMock });
-
-export { chromeMock };
-```
-
-## Vitest Configuration
+Unlike a typical Vitest project, `vscode` is **not** auto-mocked per test file — it's aliased
+project-wide in `vitest.config.ts` to a hand-written mock:
 
 ```typescript
-// vitest.config.ts
+// vitest.config.ts (real config)
 import { defineConfig } from 'vitest/config';
+import * as path from 'path';
 
 export default defineConfig({
   test: {
-    setupFiles: ['./test/setup.ts'],
-    environment: 'node',
     globals: true,
-    mockReset: true,
+    environment: 'node',
+    include: ['test/**/*.test.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/ui/webviewContent.ts'],
+    },
+  },
+  resolve: {
+    alias: { vscode: path.resolve(__dirname, 'test/__mocks__/vscode.ts') },
   },
 });
 ```
 
-## Testing Message Handlers
+`test/__mocks__/vscode.ts` exports, among others:
 
 ```typescript
-// test/message-handler.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { chromeMock } from './setup';
+export const StatusBarAlignment = { Left: 1, Right: 2 };
+export class ThemeColor { constructor(public id: string) {} }
+export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 };
+export const ViewColumn = { One: 1, Two: 2, Three: 3 };
+export class EventEmitter { /* minimal real EventEmitter with .event()/.fire()/.dispose() */ }
+export class Disposable { constructor(private callOnDispose: () => void) {} dispose() { this.callOnDispose(); } }
 
-// Import the handler function (not the listener registration)
-import { handleMessage } from '../src/background/message-handler';
+export function setMockConfig(values: Record<string, unknown>): void;
+export function clearMockConfig(): void;
 
-describe('handleMessage', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('handles FETCH_DATA message', async () => {
-    const message = { type: 'FETCH_DATA', payload: { url: 'https://example.com' } };
-    const sender = { tab: { id: 1 }, id: 'test-extension-id' };
-
-    const response = await handleMessage(message, sender);
-
-    expect(response.success).toBe(true);
-    expect(response.data).toBeDefined();
-  });
-
-  it('returns error for unknown message type', async () => {
-    const message = { type: 'UNKNOWN' };
-    const sender = { tab: { id: 1 }, id: 'test-extension-id' };
-
-    const response = await handleMessage(message, sender);
-
-    expect(response.success).toBe(false);
-    expect(response.error).toContain('Unknown');
-  });
-
-  it('handles errors gracefully', async () => {
-    // Force an error
-    chromeMock.storage.local.get.mockRejectedValueOnce(new Error('Storage error'));
-
-    const message = { type: 'GET_STATUS' };
-    const sender = { tab: { id: 1 }, id: 'test-extension-id' };
-
-    const response = await handleMessage(message, sender);
-
-    expect(response.success).toBe(false);
-    expect(response.error).toBeDefined();
-  });
-});
+export const workspace = { getConfiguration, onDidChangeConfiguration, onDidChangeWorkspaceFolders, workspaceFolders };
+export const window = { createStatusBarItem, createOutputChannel, createWebviewPanel, showInformationMessage, showWarningMessage, showErrorMessage };
+export const commands = { registerCommand };
+export const Uri = { file, parse };
 ```
 
-## Testing Storage Wrappers
+**If a source file starts using a `vscode.*` API not listed above, add it to this mock file
+first** — following the existing `vi.fn()` stub style — rather than reaching for an
+auto-mocking library or `vi.mock('vscode', ...)` inline in a test file.
+
+## Testing Config (real pattern, `test/configManager.test.ts`)
 
 ```typescript
-// test/storage.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { chromeMock } from './setup';
-import { getStorage, setStorage } from '../src/shared/storage';
-
-describe('Storage wrappers', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('returns null when key not found', async () => {
-    chromeMock.storage.local.get.mockResolvedValueOnce({});
-    const result = await getStorage('settings');
-    expect(result).toBeNull();
-  });
-
-  it('returns typed data when key exists', async () => {
-    const mockSettings = { theme: 'dark', enabled: true };
-    chromeMock.storage.local.get.mockResolvedValueOnce({ settings: mockSettings });
-
-    const result = await getStorage('settings');
-    expect(result).toEqual(mockSettings);
-  });
-
-  it('handles storage errors gracefully', async () => {
-    chromeMock.storage.local.get.mockRejectedValueOnce(new Error('Quota exceeded'));
-    const result = await getStorage('settings');
-    expect(result).toBeNull();
-  });
-
-  it('sets storage value', async () => {
-    const success = await setStorage('settings', { theme: 'dark', enabled: true });
-    expect(success).toBe(true);
-    expect(chromeMock.storage.local.set).toHaveBeenCalledWith({
-      settings: { theme: 'dark', enabled: true },
-    });
-  });
-});
-```
-
-## Testing Content Scripts (DOM)
-
-```typescript
-// test/content-script.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { ConfigManager } from '../src/config/configManager';
+import { setMockConfig, clearMockConfig } from './__mocks__/vscode';
 
-// Use jsdom environment for content script tests
-// vitest.config.ts: test.environmentMatchGlobs: [['test/content-*.test.ts', 'jsdom']]
+describe('ConfigManager', () => {
+  let configManager: ConfigManager;
 
-import { injectUI, removeUI } from '../src/content/content-script';
+  beforeEach(() => {
+    clearMockConfig();
+    configManager = new ConfigManager();
+  });
 
-describe('Content Script UI', () => {
   afterEach(() => {
-    document.body.innerHTML = '';
+    configManager.dispose();
   });
 
-  it('injects shadow DOM element', () => {
-    injectUI();
-    const host = document.getElementById('my-extension-root');
-    expect(host).not.toBeNull();
-    expect(host?.shadowRoot).toBeNull(); // closed shadow root is not accessible
+  it('should return default config values when no custom values are set', () => {
+    const config = configManager.getConfig();
+    expect(config.sessionResetIntervalMinutes).toBe(300);
   });
 
-  it('removes injected UI', () => {
-    injectUI();
-    removeUI();
-    const host = document.getElementById('my-extension-root');
-    expect(host).toBeNull();
+  it('should respect notifications.onApiRefresh when disabled', () => {
+    setMockConfig({ 'notifications.onApiRefresh': false });
+    expect(configManager.getConfig().notifications.onApiRefresh).toBe(false);
   });
 });
 ```
 
-## E2E Testing with Puppeteer
+`setMockConfig`/`clearMockConfig` drive the settings the mocked `workspace.getConfiguration()`
+returns — this is the standard way to test anything that reads `claudePulse.*` settings.
+
+## Testing a Class That Renders UI (real pattern, `test/statusBar.test.ts`)
 
 ```typescript
-// test/e2e/extension.e2e.test.ts
-import puppeteer, { Browser, Page } from 'puppeteer';
-import path from 'path';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { StatusBar } from '../src/ui/statusBar';
+import { ClaudePulseConfig } from '../src/config/configManager';
+import { ModelInfo } from '../src/types';
 
-const EXTENSION_PATH = path.resolve(__dirname, '../../dist');
+const makeConfig = (overrides: Partial<ClaudePulseConfig['statusBar']> = {}): ClaudePulseConfig => ({
+  statusBar: { showResetTimer: false, showTokenCount: false, showSessionCount: false, showModel: true, showEffort: true, ...overrides },
+  sessionResetIntervalMinutes: 300, sessionTokenLimit: 8_000_000, pollingIntervalSeconds: 30,
+  usageRefreshIntervalSeconds: 3600,
+  notifications: { enabled: false, useSystemNotifications: false, onNewSession: true, onSessionEnd: true, onResetTimerComplete: true, onTaskComplete: true, onApiRefresh: true },
+  taskCompletionIdleSeconds: 10, claudeHomePath: '/fake/.claude',
+});
 
-describe('Extension E2E', () => {
-  let browser: Browser;
-
-  beforeAll(async () => {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        `--disable-extensions-except=${EXTENSION_PATH}`,
-        `--load-extension=${EXTENSION_PATH}`,
-      ],
-    });
-  });
-
-  afterAll(async () => {
-    await browser.close();
-  });
-
-  it('extension loads without errors', async () => {
-    const targets = await browser.targets();
-    const serviceWorker = targets.find(
-      (t) => t.type() === 'service_worker'
-    );
-    expect(serviceWorker).toBeDefined();
-  });
+describe('StatusBar model and effort segment', () => {
+  let statusBar: StatusBar;
+  beforeEach(() => { statusBar = new StatusBar(); });
+  afterEach(() => { statusBar.dispose(); });
+  // ... update() with a real ClaudePulseConfig + ModelInfo, then assert on the mocked
+  // StatusBarItem's .text (available via the mock returned by window.createStatusBarItem)
 });
 ```
+
+Build a full, realistic fixture object (as `makeConfig`/`makeModelInfo` do) rather than a
+partial one cast with `as` — every field is read somewhere in `render()`.
+
+## Testing Data Readers
+
+Data readers (`readStats`, `readSessions`, `readModelInfo`, ...) take a filesystem path and are
+plain async functions with no `vscode` dependency — test them by pointing at a temp directory
+or by mocking `fs`/`fs.promises` directly with `vi.fn()`, not by touching the `vscode` mock at
+all. Always include a "malformed/missing file → returns `null`/`[]`" case alongside the happy
+path, matching the null-return convention in `references/code-style.md`.
+
+## Testing Module-Level Caches
+
+Every module-level cache (`usageApi.ts`'s `cache`, `modelReader.ts`'s three caches,
+`jsonlScanner.ts`'s `scanCache`) is invisible to a test unless it's explicitly cleared:
+
+```typescript
+import { clearUsageCache } from '../src/data/usageApi';
+
+beforeEach(() => {
+  clearUsageCache(); // otherwise a previous test's cached response leaks into this one
+});
+```
+
+## Coverage Notes
+
+- Coverage provider is `v8`, scoped to `src/**/*.ts`
+- `src/ui/webviewContent.ts` is **excluded from coverage** — it's templated HTML/CSS/JS, not logic worth asserting against line-by-line
+- Current suite: 9 test files, 213 test cases (`configManager`, `dataAggregator`, `fileWatcher`, `formatting`, `modelReader`, `sessionReader`, `statsReader`, `statusBar`, `taskCompletionDetector`)
+- Run: `npm test` (`node --experimental-vm-modules node_modules/.bin/vitest run`) or `npm run test:coverage`
 
 ## Key Testing Rules
 
-1. **Mock `chrome.*` globally** in setup file — every test gets clean mocks
-2. **Reset mocks in `beforeEach`** — prevent state leakage between tests
-3. **Test handlers, not listeners** — export handler functions separately from listener registration
-4. **Use `mockResolvedValueOnce`** for async chrome APIs — one-time mock per test
-5. **Test error paths** — verify graceful failure with `mockRejectedValueOnce`
-6. **jsdom for content scripts** — use environment matching to switch test environment
+1. **`vscode` is a project-wide alias, not a per-test mock** — extend `test/__mocks__/vscode.ts` when a new API is needed
+2. **`clearMockConfig()`/`setMockConfig()` in `beforeEach`** for anything touching `ConfigManager`
+3. **`clearXCache()` in `beforeEach`** for anything touching a module-level cache
+4. **Dispose what you construct** — every test that builds a `Disposable` (`StatusBar`, `FileWatcher`, `ConfigManager`, ...) calls `.dispose()` in `afterEach`
+5. **Build full fixtures**, not partial casts, for config/data objects passed into render or comparison logic
+6. **Test the null/empty path** for every data reader alongside its happy path

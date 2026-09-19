@@ -18,6 +18,8 @@ const SESSION_ID = '6262ea69-f0c0-43c1-9bb2-000ffef8dd6c';
 
 /** All transcript fixtures are stamped here; settings.json defaults to an hour earlier. */
 const TRANSCRIPT_AT = '2026-08-01T11:23:04.004Z';
+/** Epoch ms of TRANSCRIPT_AT — what readModelInfo reports as the session's last activity. */
+const TRANSCRIPT_AT_MS = Date.parse(TRANSCRIPT_AT);
 const SETTINGS_OLDER_MS = Date.parse('2026-08-01T10:00:00.000Z');
 const SETTINGS_NEWER_MS = Date.parse('2026-08-01T12:00:00.000Z');
 
@@ -168,6 +170,7 @@ describe('readModelInfo', () => {
       effort: 'xhigh',
       effortSource: 'transcript',
       isSessionLive: true,
+      lastActivityAt: TRANSCRIPT_AT_MS,
     });
   });
 
@@ -204,6 +207,8 @@ describe('readModelInfo', () => {
       effort: 'xhigh',
       effortSource: 'settings',
       isSessionLive: true,
+      // No transcript at all, so the session has proven no activity to measure a cache from.
+      lastActivityAt: 0,
     });
   });
 
@@ -285,6 +290,7 @@ describe('readModelInfo', () => {
       effort: 'high',
       effortSource: 'settings',
       isSessionLive: true,
+      lastActivityAt: TRANSCRIPT_AT_MS,
     });
   });
 
@@ -343,6 +349,8 @@ describe('readModelInfo', () => {
       effort: 'xhigh',
       effortSource: 'settings',
       isSessionLive: true,
+      // User records carry no timestamp in this fixture, and none is invented for them.
+      lastActivityAt: 0,
     });
   });
 

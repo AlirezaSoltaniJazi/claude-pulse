@@ -1,168 +1,127 @@
-# Service Worker Patterns
+# Extension Host Lifecycle Patterns
+
+A VS Code extension host is **not** a browser extension service worker. There is no
+event-driven wake/idle/terminate cycle to design around: once `activate()` runs, the extension
+host process stays alive for as long as the VS Code window is open. This file covers the real
+lifecycle and background-task patterns used in `claude-pulse`.
 
 ## Lifecycle Overview
 
-Chrome MV3 service workers are **ephemeral** — they start on events, run handlers, and terminate when idle (~30 seconds of inactivity).
-
+```text
+VS Code window opens → onStartupFinished fires → activate(context) runs once
+  → extension host stays alive for the life of the window →
+  window closes / extension disabled or reloaded → deactivate() runs
 ```
-Install → Activate → Idle → Terminate → (event) → Wake → Handle → Idle → Terminate → ...
-```
 
-## Event Registration (Must Be Synchronous)
+There is no analogue to "the process terminates after ~30s idle and must recover state on next
+wake" — `cachedData` and every module-level cache in this codebase simply stay in memory for as
+long as the window is open. Don't add service-worker-style state recovery logic; it solves a
+problem this runtime doesn't have.
 
-All event listeners MUST be registered synchronously at the top level of the service worker. Chrome only dispatches events to listeners registered during the initial execution.
+## `activate()` — Real Wiring (`src/extension.ts`, abridged)
 
 ```typescript
-// service-worker.ts — TOP LEVEL, synchronous registration
+export function activate(context: vscode.ExtensionContext): void {
+  configManager = new ConfigManager();
+  fileWatcher = new FileWatcher(config.claudeHomePath, config.pollingIntervalSeconds * 1000);
+  fileWatcher.start();
 
-// CORRECT: registered at top level
-chrome.runtime.onInstalled.addListener(handleInstalled);
-chrome.runtime.onMessage.addListener(handleMessage);
-chrome.alarms.onAlarm.addListener(handleAlarm);
-chrome.action.onClicked.addListener(handleActionClick);
-chrome.contextMenus.onClicked.addListener(handleContextMenu);
+  statusBar = new StatusBar();
+  dashboardPanel = new DashboardPanel();
+  sessionMonitor = new SessionMonitor();
+  taskCompletionDetector = new TaskCompletionDetector(config.taskCompletionIdleSeconds);
+  notificationManager = new NotificationManager(config, sessionMonitor, taskCompletionDetector);
 
-// WRONG: registered inside async function or setTimeout — events will be missed
-// setTimeout(() => { chrome.runtime.onMessage.addListener(...) }); // DON'T DO THIS
-```
+  refreshData(false);
+  refreshUsageData(true);
+  startUsageRefreshInterval(config.usageRefreshIntervalSeconds);
 
-## State Recovery Pattern
-
-Never rely on in-memory state. Always recover from `chrome.storage.session`:
-
-```typescript
-// State management with session storage
-interface ServiceWorkerState {
-  lastFetchTime: number;
-  activeTabId: number | null;
-  featureFlags: Record<string, boolean>;
+  // Wire events (see references/message-passing-guide.md), register commands, then:
+  context.subscriptions.push(
+    configManager, fileWatcher, statusBar, dashboardPanel,
+    sessionMonitor, taskCompletionDetector, notificationManager,
+    { dispose: () => { if (usageRefreshInterval) clearInterval(usageRefreshInterval); } }
+  );
 }
+```
 
-const DEFAULT_STATE: ServiceWorkerState = {
-  lastFetchTime: 0,
-  activeTabId: null,
-  featureFlags: {},
+**Rule**: every object that owns a timer, a filesystem watcher, or an `EventEmitter` must
+either implement `vscode.Disposable` and be pushed to `context.subscriptions`, or be wrapped in
+an inline `{ dispose: () => {...} }` object (as done above for the plain `setInterval` handle).
+
+## Module-Level State, Not Per-Wake Recovery
+
+`cachedData` in `extension.ts` is the single mutable object holding everything the UI renders
+(`stats`, `sessions`, `usage`, `modelInfo`, ...). It is built up once at activation and merged
+into on every refresh — there is no "cold start" to recover from on each timer tick, because the
+process never actually stops between ticks.
+
+```typescript
+let cachedData: ClaudePulseData = {
+  stats: null, sessions: [], activeSessions: [], mostRecentSession: null,
+  weeklyUsage: null, todayActivity: null, usage: null, modelInfo: null,
 };
-
-async function getState(): Promise<ServiceWorkerState> {
-  const result = await chrome.storage.session.get('swState');
-  return result.swState ?? DEFAULT_STATE;
-}
-
-async function setState(updates: Partial<ServiceWorkerState>): Promise<void> {
-  const current = await getState();
-  await chrome.storage.session.set({
-    swState: { ...current, ...updates },
-  });
-}
-
-// Usage in handler
-async function handleMessage(
-  message: ContentMessage,
-  sender: chrome.runtime.MessageSender,
-  sendResponse: (response: MessageResponse) => void
-): Promise<void> {
-  const state = await getState(); // Always recover state first
-  // ... handle message using state
-  await setState({ lastFetchTime: Date.now() }); // Persist updates
-}
 ```
 
-## Keep-Alive with Alarms
+## Background Work Uses Plain Timers, Not `chrome.alarms`
 
-For periodic background tasks, use `chrome.alarms` (minimum interval: 1 minute in production, 30 seconds with dev flag):
+There is no alarms API and no reason for one — `setInterval`/`setTimeout` are simply left
+running for the life of the extension host:
+
+| Timer | Owner | Interval |
+|---|---|---|
+| Usage API refresh | `extension.ts` (`startUsageRefreshInterval`) | `claudePulse.usageRefreshIntervalSeconds` (min 60s) |
+| Status bar re-render | `StatusBar` | `STATUS_BAR_TICK_MS` (1s) |
+| Task-completion poll | `TaskCompletionDetector` | `TASK_DETECTOR_POLL_MS` (2s) |
+| File watcher fallback poll | `FileWatcher` | `pollingIntervalSeconds` (stats) / `WATCH_POLL_INTERVAL_MS` (settings + transcript) |
+| Session liveness check | `SessionMonitor` | `LIVENESS_CHECK_INTERVAL_MS` (10s) |
+
+Every one of these is cleared in its owner's `dispose()`. None of them need to persist state to
+survive a restart — if the window closes, the timers simply stop.
+
+## Guarding Out-of-Order Async Writes
+
+Because the process is long-lived and several async operations can be in flight at once, the
+real hazard here is **race conditions between concurrent writers to `cachedData`**, not
+"lost state on wake". `extension.ts` handles this with a monotonically increasing sequence
+token for `modelInfo`, which two independent async paths can both resolve:
 
 ```typescript
-// service-worker.ts
-chrome.runtime.onInstalled.addListener(() => {
-  // Create periodic alarm
-  chrome.alarms.create('periodic-sync', { periodInMinutes: 5 });
-});
+let modelInfoSeq = 0;
 
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  switch (alarm.name) {
-    case 'periodic-sync':
-      await performSync();
-      break;
-  }
-});
-```
-
-## Offscreen Documents (Long-Running Tasks)
-
-For tasks that exceed service worker lifetime (audio, DOM parsing, etc.):
-
-```typescript
-// service-worker.ts
-async function ensureOffscreenDocument(): Promise<void> {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-  });
-
-  if (existingContexts.length === 0) {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen/offscreen.html',
-      reasons: [chrome.offscreen.Reason.DOM_PARSER],
-      justification: 'Parse HTML content from fetched pages',
-    });
-  }
+async function refreshData(): Promise<void> {
+  const modelToken = ++modelInfoSeq;
+  const freshModelInfo = await readModelInfo(/* ... */); // may take a while (weekly scan runs alongside it)
+  // A faster, later call to refreshModelInfo() may have already advanced modelInfoSeq —
+  // if so, THIS result is stale and must be discarded rather than overwriting the newer one.
+  const modelInfo = modelToken === modelInfoSeq ? freshModelInfo : cachedData.modelInfo;
 }
 ```
 
-## onInstalled Handler
+This pattern — a sequence counter compared after an await — is the idiomatic way to guard
+shared module state in this codebase; reach for it instead of a mutex/lock abstraction.
+
+## `deactivate()`
 
 ```typescript
-chrome.runtime.onInstalled.addListener(async (details) => {
-  switch (details.reason) {
-    case 'install':
-      // First install — set defaults, open onboarding
-      await chrome.storage.local.set({ version: chrome.runtime.getManifest().version });
-      await chrome.tabs.create({ url: 'onboarding/welcome.html' });
-      break;
-
-    case 'update':
-      // Extension updated — run migrations
-      const previousVersion = details.previousVersion;
-      await runMigrations(previousVersion);
-      break;
-  }
-
-  // Always re-create context menus on install/update
-  await chrome.contextMenus.removeAll();
-  chrome.contextMenus.create({
-    id: 'main-action',
-    title: 'Extension Action',
-    contexts: ['page', 'selection'],
-  });
-});
+export function deactivate(): void {
+  // Cleanup handled by disposables
+}
 ```
 
-## Error Handling in Service Worker
-
-```typescript
-// Global error handler
-self.addEventListener('unhandledrejection', (event) => {
-  console.error('Unhandled rejection in service worker:', event.reason);
-  // Log to chrome.storage for debugging
-  chrome.storage.local.get('errorLog').then((result) => {
-    const log = result.errorLog ?? [];
-    log.push({
-      timestamp: Date.now(),
-      error: String(event.reason),
-      stack: event.reason?.stack,
-    });
-    // Keep last 50 errors
-    chrome.storage.local.set({ errorLog: log.slice(-50) });
-  });
-});
-```
+Because every stateful object is already registered in `context.subscriptions`, VS Code disposes
+them automatically on deactivation — `deactivate()` itself currently does nothing extra. Don't
+add manual cleanup here for anything that's already a `Disposable` pushed in `activate()`.
 
 ## Key Rules
 
-1. **Register all listeners at top level** — synchronously, not inside async functions
-2. **Never store state in globals** — use `chrome.storage.session` for ephemeral state
-3. **Recover state on every wake** — assume all in-memory state is gone
-4. **Use alarms for periodic tasks** — not `setInterval` (lost on termination)
-5. **Use offscreen documents** for long-running tasks — service worker has ~5 minute max
-6. **Re-create context menus in `onInstalled`** — they persist but need re-registration after updates
-7. **Handle `unhandledrejection`** — uncaught promises can crash the service worker
+1. **No wake/sleep cycle** — the extension host runs continuously; don't design around
+   ephemeral termination
+2. **Every stateful class implements `vscode.Disposable`** and is pushed to
+   `context.subscriptions` in `activate()`
+3. **Plain timers, cleared in `dispose()`** — there is no alarms API and no minimum-interval
+   restriction beyond what this project's own settings enforce (e.g. `MIN_USAGE_REFRESH_INTERVAL_SEC`)
+4. **Guard concurrent async writers with a sequence token**, not a service-worker-style
+   storage-backed state machine
+5. **`deactivate()` is a no-op by design** here — real cleanup happens via disposables, not a
+   dedicated shutdown handler

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# validate-chrome-extension.sh — Manifest + structure convention checker
-# Usage: ./scripts/validate-chrome-extension.sh [extension-root]
+# validate-chrome-extension.sh — VS Code extension structure + convention checker
+#
+# NOTE ON THE FILENAME: this script predates a rewrite of the extensionDeveloper skill from
+# Chrome-extension content to this project's actual domain (a VS Code extension). The filename
+# is kept unchanged so existing references to it (SKILL.md, symlinked skill copies) keep working;
+# only the checks below were rewritten. Despite the name, this script has nothing to do with
+# Chrome/Manifest V3 — it checks claude-pulse's package.json + src/ layout.
+#
+# Usage: ./scripts/validate-chrome-extension.sh [project-root]
 
 set -euo pipefail
 
@@ -12,78 +19,86 @@ red() { printf '\033[0;31m%s\033[0m\n' "$1"; }
 yellow() { printf '\033[0;33m%s\033[0m\n' "$1"; }
 green() { printf '\033[0;32m%s\033[0m\n' "$1"; }
 
-error() { red "ERROR: $1"; ((ERRORS++)); }
-warn() { yellow "WARN:  $1"; ((WARNINGS++)); }
+error() { red "ERROR: $1"; ERRORS=$((ERRORS + 1)); }
+warn() { yellow "WARN:  $1"; WARNINGS=$((WARNINGS + 1)); }
 ok() { green "OK:    $1"; }
 
-echo "=== Chrome Extension Validator ==="
+echo "=== VS Code Extension Validator ==="
 echo "Root: $ROOT"
 echo ""
 
-# 1. Check manifest.json exists
-if [ ! -f "$ROOT/manifest.json" ]; then
-  error "manifest.json not found"
+# 1. Check package.json exists (the extension manifest — VS Code has no separate manifest.json)
+if [ ! -f "$ROOT/package.json" ]; then
+  error "package.json not found"
   echo ""
   echo "Results: $ERRORS errors, $WARNINGS warnings"
   exit 1
 fi
-ok "manifest.json found"
+ok "package.json found"
 
-# 2. Check manifest version
-MV=$(grep -o '"manifest_version"[[:space:]]*:[[:space:]]*[0-9]*' "$ROOT/manifest.json" | grep -o '[0-9]*$')
-if [ "$MV" = "3" ]; then
-  ok "Manifest V3"
-elif [ "$MV" = "2" ]; then
-  error "Manifest V2 detected — migrate to V3"
+# 2. Check engines.vscode is declared
+if grep -q '"vscode"[[:space:]]*:' "$ROOT/package.json" 2>/dev/null; then
+  ok "engines.vscode declared"
 else
-  error "Unknown manifest version: $MV"
+  error "package.json is missing an engines.vscode field"
 fi
 
-# 3. Check for dangerous permissions
-if grep -q '"<all_urls>"' "$ROOT/manifest.json" 2>/dev/null; then
-  warn "<all_urls> permission found — use specific host patterns"
-fi
-
-if grep -q '"tabs"' "$ROOT/manifest.json" 2>/dev/null; then
-  warn '"tabs" permission found — consider "activeTab" instead'
-fi
-
-if grep -q '"webRequest"' "$ROOT/manifest.json" 2>/dev/null; then
-  warn '"webRequest" found — use "declarativeNetRequest" in MV3'
-fi
-
-# 4. Check for service worker
-if grep -q '"service_worker"' "$ROOT/manifest.json" 2>/dev/null; then
-  ok "Service worker declared"
+# 3. Check main points at a built (dist/) entry, not a src/ file
+MAIN=$(grep -o '"main"[[:space:]]*:[[:space:]]*"[^"]*"' "$ROOT/package.json" 2>/dev/null | grep -o '"[^"]*"$' | tr -d '"')
+if [[ "$MAIN" == dist/* || "$MAIN" == ./dist/* ]]; then
+  ok "package.json main points at a dist/ build output ($MAIN)"
+elif [ -n "$MAIN" ]; then
+  warn "package.json main ('$MAIN') does not point into dist/ — confirm this is intentional"
 else
-  warn "No service_worker in manifest — background logic won't run"
+  warn "package.json has no main field"
 fi
 
-# 5. Check for eval/new Function in source files
-if find "$ROOT/src" -name "*.ts" -o -name "*.js" 2>/dev/null | xargs grep -l '\beval\b\|new Function' 2>/dev/null; then
-  error "eval() or new Function() found in source — violates MV3 CSP"
+# 4. Check at least one command is contributed
+if grep -q '"commands"[[:space:]]*:' "$ROOT/package.json" 2>/dev/null; then
+  ok "contributes.commands present"
 else
-  ok "No eval/new Function usage"
+  warn "No contributes.commands found in package.json"
 fi
 
-# 6. Check for innerHTML in content scripts
-CONTENT_DIR="$ROOT/src/content"
-if [ -d "$CONTENT_DIR" ]; then
-  if find "$CONTENT_DIR" -name "*.ts" -o -name "*.js" 2>/dev/null | xargs grep -l 'innerHTML\|outerHTML' 2>/dev/null; then
-    warn "innerHTML/outerHTML found in content scripts — XSS risk, use DOM API"
+# 5. Check src/extension.ts exports activate() and deactivate()
+ENTRY="$ROOT/src/extension.ts"
+if [ -f "$ENTRY" ]; then
+  if grep -q 'export function activate' "$ENTRY"; then
+    ok "src/extension.ts exports activate()"
   else
-    ok "No innerHTML in content scripts"
+    error "src/extension.ts does not export activate()"
   fi
-fi
-
-# 7. Check for inline scripts in HTML
-if find "$ROOT" -name "*.html" -not -path "*/node_modules/*" 2>/dev/null | xargs grep -l '<script[^>]*>[^<]' 2>/dev/null; then
-  error "Inline scripts found in HTML — violates CSP"
+  if grep -q 'export function deactivate' "$ENTRY"; then
+    ok "src/extension.ts exports deactivate()"
+  else
+    warn "src/extension.ts does not export deactivate()"
+  fi
 else
-  ok "No inline scripts in HTML"
+  warn "src/extension.ts not found — skipping activate()/deactivate() check"
 fi
 
-# 8. Check TypeScript config
+# 6. This project ships NO browser extension code — flag any chrome.* usage as a real problem
+if [ -d "$ROOT/src" ] && grep -rl 'chrome\.' "$ROOT/src" --include='*.ts' >/dev/null 2>&1; then
+  error "chrome.* API usage found under src/ — this is a VS Code extension, not a Chrome extension"
+else
+  ok "No chrome.* API usage under src/"
+fi
+
+# 7. This project should have NO manifest.json (that's the Chrome-extension manifest, not VS Code's)
+if [ -f "$ROOT/manifest.json" ]; then
+  warn "manifest.json found at project root — VS Code extensions don't use one; confirm this is intentional"
+else
+  ok "No stray manifest.json at project root"
+fi
+
+# 8. Check for eval/new Function in source files
+if [ -d "$ROOT/src" ] && find "$ROOT/src" -name "*.ts" 2>/dev/null | xargs grep -l '\beval\b\|new Function' 2>/dev/null; then
+  error "eval() or new Function() found in source"
+else
+  ok "No eval/new Function usage in src/"
+fi
+
+# 9. Check TypeScript strict mode
 if [ -f "$ROOT/tsconfig.json" ]; then
   ok "tsconfig.json found"
   if grep -q '"strict"[[:space:]]*:[[:space:]]*true' "$ROOT/tsconfig.json" 2>/dev/null; then
@@ -95,18 +110,18 @@ else
   warn "tsconfig.json not found"
 fi
 
-# 9. Check for source maps in dist
-if find "$ROOT/dist" -name "*.map" 2>/dev/null | head -1 | grep -q .; then
-  warn "Source maps found in dist/ — remove for production builds"
+# 10. Check for source maps in dist/ (should be absent from a production build)
+if [ -d "$ROOT/dist" ] && find "$ROOT/dist" -name "*.map" 2>/dev/null | head -1 | grep -q .; then
+  warn "Source maps found in dist/ — remove for a production build (esbuild.js: sourcemap: !production)"
 else
   ok "No source maps in dist/"
 fi
 
-# 10. Check package.json
-if [ -f "$ROOT/package.json" ]; then
-  ok "package.json found"
+# 11. Check @vscode/vsce is available for packaging
+if grep -q '"@vscode/vsce"' "$ROOT/package.json" 2>/dev/null; then
+  ok "@vscode/vsce present as a devDependency"
 else
-  warn "package.json not found"
+  warn "@vscode/vsce not found in package.json devDependencies — 'npm run package' will fail"
 fi
 
 echo ""

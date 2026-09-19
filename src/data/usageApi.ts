@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as https from 'https';
 import * as vscode from 'vscode';
 import { ClaudeUsage } from '../types';
+import { limitShortLabel, normalizeUsage, resolveLimits } from '../utils/usageLimits';
 import {
   MAX_RETRIES,
   MAX_BACKOFF_MS,
@@ -89,9 +90,12 @@ async function doFetchUsage(): Promise<FetchUsageResult> {
     log('Calling usage API...');
     const result = await callUsageApi(credentials.accessToken);
     if (result.data) {
-      log(
-        `Usage API success: 5h=${result.data.five_hour?.utilization}%, 7d=${result.data.seven_day?.utilization}%, extra=${JSON.stringify(result.data.extra_usage)}`
-      );
+      // Logs every window the API named, so a newly-introduced one is visible in the output
+      // channel the day it appears rather than only after someone notices it missing.
+      const summary = resolveLimits(result.data)
+        .map((l) => `${limitShortLabel(l)}=${l.percent}%`)
+        .join(', ');
+      log(`Usage API success: ${summary || 'no windows'}`);
       cache = { data: result.data, timestamp: Date.now() };
       return { data: result.data, status: 'success', message: 'Usage data refreshed from API' };
     }
@@ -297,7 +301,7 @@ function callUsageApiOnce(accessToken: string): Promise<ApiResult> {
 
         try {
           if (status === 200) {
-            resolve({ status, data: JSON.parse(body) as ClaudeUsage });
+            resolve({ status, data: normalizeUsage(JSON.parse(body)) });
           } else {
             resolve({ status, data: null, retryAfterMs });
           }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { StatusBar } from '../src/ui/statusBar';
 import { ClaudePulseConfig } from '../src/config/configManager';
-import { ModelInfo } from '../src/types';
+import { ClaudeUsage, ModelInfo, UsageLimit } from '../src/types';
 
 const makeConfig = (
   statusBar: Partial<ClaudePulseConfig['statusBar']> = {}
@@ -13,8 +13,12 @@ const makeConfig = (
     showSessionCount: false,
     showModel: true,
     showEffort: true,
+    showCacheWarmth: false,
+    showScopedUsage: true,
     ...statusBar,
   },
+  showAgentMap: true,
+  promptCacheTtlMinutes: 60,
   sessionResetIntervalMinutes: 300,
   sessionTokenLimit: 8_000_000,
   pollingIntervalSeconds: 30,
@@ -38,7 +42,26 @@ const makeModelInfo = (overrides: Partial<ModelInfo> = {}): ModelInfo => ({
   effort: 'xhigh',
   effortSource: 'transcript',
   isSessionLive: true,
+  lastActivityAt: 0,
   ...overrides,
+});
+
+const makeLimit = (overrides: Partial<UsageLimit> = {}): UsageLimit => ({
+  kind: 'weekly_scoped',
+  group: 'weekly',
+  percent: 2,
+  resets_at: null,
+  modelLabel: 'Fable',
+  ...overrides,
+});
+
+const makeUsage = (limits: UsageLimit[]): ClaudeUsage => ({
+  five_hour: null,
+  seven_day: null,
+  seven_day_sonnet: null,
+  seven_day_opus: null,
+  limits,
+  extra_usage: null,
 });
 
 describe('StatusBar model and effort segment', () => {
@@ -216,5 +239,162 @@ describe('StatusBar model and effort segment', () => {
       statusBar.update(makeConfig(), null, null, null, info);
       expect(item().text).not.toMatch(/ {2}/);
     }
+  });
+});
+
+describe('StatusBar model-scoped usage segment', () => {
+  let statusBar: StatusBar;
+
+  const item = (): { text: string; tooltip: string } =>
+    vi.mocked(vscode.window.createStatusBarItem).mock.results[0].value;
+
+  beforeEach(() => {
+    vi.mocked(vscode.window.createStatusBarItem).mockClear();
+    statusBar = new StatusBar();
+  });
+
+  afterEach(() => {
+    statusBar.dispose();
+  });
+
+  it('renders the scoped percentage and its reset at the end of the bar', () => {
+    const weeklyReset = new Date(Date.now() + (4 * 24 + 5) * 3_600_000 + 60_000).toISOString();
+    // The three windows a live response actually carries: the bar leads with the session,
+    // and the scoped window rides at the tail rather than competing for the headline.
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([
+        makeLimit({ kind: 'session', group: 'session', percent: 34, modelLabel: null }),
+        makeLimit({ kind: 'weekly_all', percent: 42, modelLabel: null }),
+        makeLimit({ percent: 2, resets_at: weeklyReset }),
+      ]),
+      makeModelInfo()
+    );
+
+    expect(item().text).toBe('$(pulse) 34% $(sparkle) Opus 5 · xhigh | Fable 2% 4d 5h');
+  });
+
+  it('names the model the API scoped the window to, whatever that is', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([makeLimit({ modelLabel: 'Nimbus', percent: 7 })]),
+      null
+    );
+
+    expect(item().text).toContain('| Nimbus 7%');
+  });
+
+  it('omits a window that rounds to 0%, which would read as a bug rather than as unused', () => {
+    statusBar.update(makeConfig(), null, null, makeUsage([makeLimit({ percent: 0.4 })]), null);
+
+    expect(item().text).not.toContain('Fable');
+  });
+
+  it('omits unscoped windows — they already own the leading percentage', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([makeLimit({ kind: 'weekly_all', modelLabel: null, percent: 42 })]),
+      null
+    );
+
+    expect(item().text).toBe('$(pulse) 42%');
+  });
+
+  it('can be turned off', () => {
+    statusBar.update(
+      makeConfig({ showScopedUsage: false }),
+      null,
+      null,
+      makeUsage([makeLimit({ percent: 2 })]),
+      null
+    );
+
+    expect(item().text).not.toContain('Fable');
+  });
+
+  it('drops the reset when the window carries no reset time', () => {
+    statusBar.update(makeConfig(), null, null, makeUsage([makeLimit({ resets_at: null })]), null);
+
+    expect(item().text).toContain('Fable 2%');
+    expect(item().text).not.toMatch(/Fable 2% \S/);
+  });
+
+  it('puts the scoped window in the tooltip with its reset', () => {
+    const resets = new Date(Date.now() + 2 * 24 * 3_600_000 + 60_000).toISOString();
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([makeLimit({ percent: 2, resets_at: resets })]),
+      null
+    );
+
+    expect(item().tooltip).toContain('Fable: 2% — resets in 2d');
+  });
+});
+
+describe('StatusBar scoped usage divider', () => {
+  let statusBar: StatusBar;
+
+  const item = (): { text: string; tooltip: string } =>
+    vi.mocked(vscode.window.createStatusBarItem).mock.results[0].value;
+
+  beforeEach(() => {
+    vi.mocked(vscode.window.createStatusBarItem).mockClear();
+    statusBar = new StatusBar();
+  });
+
+  afterEach(() => {
+    statusBar.dispose();
+  });
+
+  it('separates the scoped window from the effort it would otherwise run into', () => {
+    statusBar.update(
+      makeConfig({ showModel: false }),
+      null,
+      null,
+      makeUsage([
+        makeLimit({ kind: 'session', group: 'session', percent: 36, modelLabel: null }),
+        makeLimit({ percent: 2 }),
+      ]),
+      makeModelInfo({ effort: 'medium' })
+    );
+
+    // 'med Fable 2%' reads as one phrase; the divider is what stops that.
+    expect(item().text).toBe('$(pulse) 36% $(sparkle) med | Fable 2%');
+  });
+
+  it('adds no divider when there is no scoped window to divide', () => {
+    statusBar.update(
+      makeConfig(),
+      null,
+      null,
+      makeUsage([makeLimit({ kind: 'weekly_all', modelLabel: null, percent: 42 })]),
+      makeModelInfo()
+    );
+
+    expect(item().text).not.toContain('|');
+  });
+
+  it('pushes one divider, not one per scoped window', () => {
+    statusBar.update(
+      makeConfig({ showModel: false, showEffort: false }),
+      null,
+      null,
+      makeUsage([
+        makeLimit({ kind: 'session', group: 'session', percent: 36, modelLabel: null }),
+        makeLimit({ percent: 2 }),
+        makeLimit({ modelLabel: 'Nimbus', percent: 3 }),
+      ]),
+      null
+    );
+
+    expect(item().text).toBe('$(pulse) 36% | Fable 2% Nimbus 3%');
   });
 });

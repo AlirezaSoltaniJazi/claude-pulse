@@ -1,143 +1,88 @@
-# Manifest V3 Patterns
+# Package.json Contribution Patterns
 
-## Minimal Manifest
+VS Code extensions have no separate `manifest.json`. The extension manifest IS `package.json` —
+`engines.vscode`, `activationEvents`, `main`, and the `contributes` block together declare
+everything the Chrome-extension world would put in a manifest. This file documents the shape
+`claude-pulse`'s real `package.json` uses; see the project root `package.json` for the full,
+current file.
+
+## Extension Identity & Activation (as declared in this project)
 
 ```json
 {
-  "manifest_version": 3,
-  "name": "Extension Name",
-  "version": "1.0.0",
-  "description": "Brief description",
-  "permissions": ["storage", "activeTab"],
-  "background": {
-    "service_worker": "dist/service-worker.js",
-    "type": "module"
-  },
-  "action": {
-    "default_popup": "popup/popup.html",
-    "default_icon": {
-      "16": "assets/icon-16.png",
-      "48": "assets/icon-48.png",
-      "128": "assets/icon-128.png"
+  "name": "claude-pulse-monitor",
+  "displayName": "Claude Pulse Monitor",
+  "publisher": "AlirezaSoltaniJazi",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js"
+}
+```
+
+- `engines.vscode` pins the minimum VS Code (and therefore minimum Node/Electron) API surface — `esbuild.js` targets `node18` specifically because `^1.85.0` ships Electron 25 / Node 18
+- `activationEvents: ["onStartupFinished"]` means the extension activates once VS Code's own startup work is done, not lazily on a command or file type. Other activation events exist in the VS Code API generally (`onCommand`, `onLanguage`, `workspaceContains`, etc.) but this project does not use them — don't add one without a reason
+- `main` points at the esbuild output (`dist/extension.js`), not a `src/` file
+
+## Commands Contribution
+
+```json
+{
+  "contributes": {
+    "commands": [
+      { "command": "claudePulse.showDashboard", "title": "Claude Pulse: Show Dashboard" },
+      { "command": "claudePulse.refreshData", "title": "Claude Pulse: Refresh Data" },
+      { "command": "claudePulse.resetTimer", "title": "Claude Pulse: Reset Session Timer" },
+      { "command": "claudePulse.toggleNotifications", "title": "Claude Pulse: Toggle Notifications" }
+    ]
+  }
+}
+```
+
+**Rule**: every entry here must have a matching `vscode.commands.registerCommand('claudePulse.x', ...)` call in `src/extension.ts`, and vice versa. The `title` convention in this project is always `"Claude Pulse: <Action>"`.
+
+## Configuration Contribution
+
+```json
+{
+  "contributes": {
+    "configuration": {
+      "title": "Claude Pulse",
+      "properties": {
+        "claudePulse.pollingIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "description": "How often to refresh data from Claude files (seconds)"
+        }
+      }
     }
-  },
-  "icons": {
-    "16": "assets/icon-16.png",
-    "48": "assets/icon-48.png",
-    "128": "assets/icon-128.png"
   }
 }
 ```
 
-## Content Scripts Declaration
+**Rule**: every property here must be read in `src/config/configManager.ts`'s `getConfig()` with an identical default, and reflected in the `ClaudePulseConfig` interface in `src/types.ts`. This is the single most common place for the two halves of "the manifest" (`package.json`) and the code to drift apart — see `references/common-issues.md`.
 
-```json
-{
-  "content_scripts": [
-    {
-      "matches": ["https://specific-domain.com/*"],
-      "js": ["dist/content-script.js"],
-      "css": ["assets/content-style.css"],
-      "run_at": "document_idle",
-      "world": "ISOLATED"
-    }
-  ]
-}
+## Extension Host Bundling (esbuild, not a browser bundler)
+
+```js
+// esbuild.js (actual config, abridged)
+esbuild.context({
+  entryPoints: ['src/extension.ts'],
+  bundle: true,
+  format: 'cjs',
+  platform: 'node',
+  target: 'node18',              // pinned to the OLDEST VS Code this extension claims to support
+  outfile: 'dist/extension.js',
+  external: ['vscode', 'node-notifier'],
+  sourcemap: !production,        // no source maps in the production build
+});
 ```
 
-### `run_at` Values
+- Single entry point (`src/extension.ts`) — there is no separate service-worker/content-script/popup bundle to configure, because none of those concepts exist for a VS Code extension
+- `external: ['vscode']` is required — the `vscode` module is provided by the Extension Host at runtime, never bundled
+- `external: ['node-notifier']` — kept external and `require()`'d dynamically at runtime (see `notificationManager.ts`) rather than bundled, so the dependency is only touched when system notifications are enabled
 
-| Value | When | Use Case |
-|---|---|---|
-| `document_idle` | After DOM loaded, page idle | Default — safest, least intrusive |
-| `document_end` | After DOM loaded, before subresources | Need early DOM access |
-| `document_start` | Before DOM exists | Inject CSS, intercept requests |
+## Marketplace Publishing
 
-### `world` Values
-
-| Value | Behavior |
-|---|---|
-| `ISOLATED` (default) | Separate JS context, shared DOM access |
-| `MAIN` | Shares page's JS context — can access page variables, but risks conflicts |
-
-## Permissions Strategy
-
-```json
-{
-  "permissions": ["storage", "activeTab", "alarms", "contextMenus"],
-  "optional_permissions": ["notifications", "tabs"],
-  "host_permissions": ["https://api.example.com/*"],
-  "optional_host_permissions": ["https://*/*"]
-}
-```
-
-### Permission Decision Matrix
-
-| Need | Permission | Why |
-|---|---|---|
-| Read current tab URL/content | `activeTab` | Granted on user gesture only — least privilege |
-| Access any tab URL | `tabs` | Over-privileged — use `activeTab` instead when possible |
-| Persistent key-value storage | `storage` | Required for `chrome.storage.*` |
-| Network request modification | `declarativeNetRequest` | Replaces `webRequest` blocking in MV3 |
-| Background timers | `alarms` | Keep service worker alive, schedule tasks |
-| Right-click menus | `contextMenus` | Adds items to browser context menu |
-| Side panel | `sidePanel` | Enables `chrome.sidePanel` API |
-
-## Web Accessible Resources (V3)
-
-```json
-{
-  "web_accessible_resources": [
-    {
-      "resources": ["assets/injected-style.css", "assets/icon.png"],
-      "matches": ["https://specific-domain.com/*"]
-    }
-  ]
-}
-```
-
-**Rules**:
-- Never use `<all_urls>` in `matches` — restrict to specific origins
-- Only expose files that content scripts need to inject into pages
-- Never expose service worker or popup scripts
-
-## Content Security Policy
-
-```json
-{
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'",
-    "sandbox": "sandbox allow-scripts; script-src 'self'"
-  }
-}
-```
-
-**MV3 CSP Rules**:
-- Cannot relax `script-src` beyond `'self'`
-- No `unsafe-eval`, no `unsafe-inline`
-- No remote script sources
-- `object-src 'self'` blocks plugin content
-
-## Side Panel Configuration
-
-```json
-{
-  "permissions": ["sidePanel"],
-  "side_panel": {
-    "default_path": "sidepanel/sidepanel.html"
-  }
-}
-```
-
-## Externally Connectable
-
-```json
-{
-  "externally_connectable": {
-    "matches": ["https://your-webapp.com/*"],
-    "ids": ["other-extension-id"]
-  }
-}
-```
-
-**Security**: Always verify `sender.origin` and `sender.id` in `onMessageExternal` handlers.
+Packaging (`npm run package` → `vsce package --no-update-package-json`) and the full release process (version bumps, CHANGELOG promotion, CI-only publishing via `vsce publish`) are documented in **`PUBLISHING.md`** at the project root — don't duplicate those steps here. This skill's job is the extension code itself, not the release pipeline.

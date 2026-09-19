@@ -10,6 +10,7 @@ Claude Pulse gives you real-time visibility into your Claude Code activity — u
 
 - Live usage percentage (max across 5-hour and 7-day windows)
 - Session reset countdown timer (from API or estimated)
+- Current model and reasoning effort level (e.g. `Opus 5 · xhigh`), each shown/hidden independently
 - Optional message count and session count display
 - Five-tier color-coded usage: blue (<25%), green (25-49%), amber (50-69%), orange (70-89%), red (90%+)
 
@@ -23,7 +24,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - **Session info** — Active session PID, working directory, duration, and reset time
 - **Weekly summary** — Total tokens, messages, sessions, and tool calls for the current week
 - **Sonnet breakdown** — Sonnet token usage and percentage of total
-- **Lifetime stats** — Total sessions, messages, first session date, longest session
+- **Lifetime stats** — Total tokens, favorite model, total sessions and messages, first session date, longest session, active-day streaks, and most active day
 - **Model breakdown** — Token usage table by model (input, output, cache read, cache create)
 - **Hourly activity chart** — Visual bar chart of activity distribution by hour
 
@@ -32,6 +33,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 ### Real-Time Monitoring
 
 - File watching on `~/.claude/` for stats and session changes
+- Per-window session matching — each VS Code window follows the Claude session for its own workspace folder, so running Claude in several projects at once never mixes them up
 - PID liveness detection for active session tracking
 - Notifications on session start, session end, and reset timer completion
 - Optional OS-level system notifications (via node-notifier)
@@ -41,7 +43,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - Fetches live usage data from the Anthropic API using your existing OAuth credentials
 - Reads credentials from macOS Keychain or `~/.claude/.credentials.json`
 - Retry logic with exponential backoff and rate-limit handling
-- Configurable refresh interval (minimum 60 seconds)
+- Configurable refresh interval (minimum 60 seconds), plus an opportunistic refresh right after Claude finishes a task so the percentage is current when you look at it
 
 ## Installation
 
@@ -53,7 +55,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 Or install from the command line:
 
 ```bash
-code --install-extension AlirezaSoltaniJazi.claude-pulse
+code --install-extension AlirezaSoltaniJazi.claude-pulse-monitor
 ```
 
 ## Requirements
@@ -73,16 +75,22 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `statusBar.showSessionCount` | boolean | `false` | Show today's session count in status bar |
 | `statusBar.showModel` | boolean | `true` | Show the Claude model currently in use (e.g. `Opus 5`) in status bar |
 | `statusBar.showEffort` | boolean | `true` | Show the model's reasoning effort level (e.g. `xhigh`) in status bar |
+| `statusBar.showCacheWarmth` | boolean | `false` | Show an approximate prompt-cache countdown (e.g. `~59m`) in status bar |
+| `statusBar.showScopedUsage` | boolean | `true` | Show model-specific weekly usage once above 0% (e.g. `Fable 2% 4d 5h`) |
+| `showAgentMap` | boolean | `true` | Show the Agents section listing the subagents this session spawned |
+| `promptCacheTtlMinutes` | number | `60` | Assumed prompt-cache lifetime in minutes (1–1440) |
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
 | `sessionTokenLimit` | number | `8000000` | Estimated token limit per session window (for usage % calculation) |
 | `pollingIntervalSeconds` | number | `30` | How often to check Claude files for changes (min: 5) |
-| `usageRefreshIntervalSeconds` | number | `60` | How often to refresh from the Anthropic API (min: 60) |
+| `usageRefreshIntervalSeconds` | number | `3600` | How often to refresh from the Anthropic API (min: 60) |
 | `notifications.enabled` | boolean | `false` | Enable notifications for Claude events |
 | `notifications.useSystemNotifications` | boolean | `false` | Use OS-level desktop notifications |
 | `notifications.onNewSession` | boolean | `true` | Notify when a new Claude session starts |
 | `notifications.onSessionEnd` | boolean | `true` | Notify when a Claude session ends |
 | `notifications.onResetTimerComplete` | boolean | `true` | Notify when the session reset timer reaches zero |
+| `notifications.onTaskComplete` | boolean | `true` | Notify when Claude finishes a task and is waiting for input |
 | `notifications.onApiRefresh` | boolean | `true` | Show a confirmation toast when API usage data is manually refreshed (errors are always shown) |
+| `taskCompletionIdleSeconds` | number | `10` | Seconds of inactivity after Claude's last response before considering a task complete |
 | `claudeHomePath` | string | `""` | Custom path to .claude directory (leave empty for `~/.claude`) |
 
 ## Commands
@@ -131,7 +139,7 @@ After setup, you'll receive macOS notification banners for:
 
 ## Known Limitations
 
-- OAuth credential reading is currently supported on macOS (Keychain) and Linux (file-based). Windows support is not yet implemented.
+- OAuth credential reading uses the macOS Keychain, with a file-based fallback (`~/.claude/.credentials.json`) on Linux and Windows.
 - The extension reads stats written by Claude Code CLI — if the CLI changes its file format, stats parsing may need updates.
 - Usage API data depends on having a valid OAuth session with Claude Code.
 
@@ -148,11 +156,12 @@ npm install
 # Development
 npm run watch    # Build in watch mode
 # Press F5 in VS Code to launch Extension Development Host
+npm run dev      # or: build once + launch Extension Development Host directly (no F5 needed)
 
 # Quality checks
 npm run lint     # ESLint
 npm run format:check  # Prettier
-npm test         # Vitest (66 tests)
+npm test         # Vitest (213 tests)
 npm run build    # Production build
 ```
 

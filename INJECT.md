@@ -1,6 +1,6 @@
 # Claude Pulse — Quick Reference
 
-- **Stack**: TypeScript 5.3 (strict) + VS Code Extension API + esbuild + Vitest
+- **Stack**: TypeScript 6.0 (strict) + VS Code Extension API + esbuild + Vitest
 - **Entry point**: `src/extension.ts` → `activate()` / `deactivate()`
 - **Key dirs**: `src/data/` (readers, API, file watcher) · `src/ui/` (status bar, webview) · `src/config/` (settings) · `src/notifications/` (session monitor)
 - **Run**: `npm run watch` + F5 · `npm test` · `npm run lint`

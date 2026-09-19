@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   formatDuration,
+  formatDurationDays,
   formatDurationShort,
   formatEffortLevel,
   formatModelName,
@@ -282,5 +283,24 @@ describe('formatDate', () => {
   it('pads single-digit month and day', () => {
     const date = new Date('2025-01-05T12:00:00Z');
     expect(formatDate(date)).toBe('2025-01-05');
+  });
+});
+
+describe('formatDurationDays', () => {
+  it('falls back to the hour form under a day', () => {
+    expect(formatDurationDays(3 * 3_600_000 + 31 * 60_000)).toBe('3h 31m');
+  });
+
+  it('uses days and hours for a weekly window', () => {
+    // 101h 11m — what a 7-day reset actually looks like, and unreadable as raw hours.
+    expect(formatDurationDays(101 * 3_600_000 + 11 * 60_000)).toBe('4d 5h');
+  });
+
+  it('drops a zero hour remainder', () => {
+    expect(formatDurationDays(48 * 3_600_000)).toBe('2d');
+  });
+
+  it('treats exactly 24h as one day', () => {
+    expect(formatDurationDays(24 * 3_600_000)).toBe('1d');
   });
 });

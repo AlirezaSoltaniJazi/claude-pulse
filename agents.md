@@ -8,13 +8,13 @@ VS Code extension that monitors Claude Code usage, sessions, and token consumpti
 
 | Component | Technology |
 |-----------|-----------|
-| Language | TypeScript 5.3 (strict mode) |
+| Language | TypeScript 6.0 (strict mode) |
 | Platform | VS Code Extension API (^1.85.0) |
 | Build | esbuild (CJS output for Node.js) |
 | Tests | Vitest (node environment, globals enabled) |
 | Lint | ESLint + @typescript-eslint + Prettier |
 | Git hooks | Husky + lint-staged (pre-commit) |
-| CI/CD | GitHub Actions (lint, test, build on Node 18 & 20) |
+| CI/CD | GitHub Actions (lint, test, build on Node 20 & 22) |
 | Runtime dep | node-notifier (optional, system notifications) |
 
 ## Project Structure
@@ -29,9 +29,11 @@ src/
 ├── data/
 │   ├── statsReader.ts        # Reads ~/.claude/stats-cache.json
 │   ├── sessionReader.ts      # Reads ~/.claude/sessions/*.json, detects active PIDs
+│   ├── modelReader.ts        # Reads active model + reasoning effort from session transcript / global settings
 │   ├── usageApi.ts           # Anthropic OAuth API client (retry, cache, credentials)
 │   ├── fileWatcher.ts        # Hybrid: FSWatch + polling for ~/.claude/ changes
 │   ├── jsonlScanner.ts       # Scans JSONL session logs for weekly token counts
+│   ├── taskCompletionDetector.ts # Idle-timeout detection for task-complete notifications
 │   └── dataAggregator.ts     # Aggregates daily activity from StatsCache
 ├── notifications/
 │   ├── sessionMonitor.ts     # PID liveness detection for session tracking
@@ -47,9 +49,13 @@ test/
 ├── __mocks__/vscode.ts       # Manual VS Code API mock
 ├── configManager.test.ts
 ├── dataAggregator.test.ts
+├── fileWatcher.test.ts
 ├── formatting.test.ts
+├── modelReader.test.ts
 ├── sessionReader.test.ts
-└── statsReader.test.ts
+├── statsReader.test.ts
+├── statusBar.test.ts
+└── taskCompletionDetector.test.ts
 ```
 
 ## How To Run
@@ -60,11 +66,12 @@ npm install
 
 # Dev mode (watch + Extension Host)
 npm run watch          # then F5 in VS Code to launch Extension Host
+npm run dev            # build once + launch Extension Host directly (alternative to F5)
 
 # Production build
 npm run build
 
-# Tests (74 tests)
+# Tests (213 tests)
 npm test
 npm run test:coverage
 
@@ -90,7 +97,7 @@ npm run format:check
 | Functions/variables | camelCase, verb-first | `readStats()`, `getActiveSessions()` |
 | Classes | PascalCase | `ConfigManager`, `StatusBar`, `FileWatcher` |
 | Interfaces | PascalCase, no "I" prefix | `ClaudePulseConfig`, `SessionFile`, `StatsCache` |
-| Constants | SCREAMING_SNAKE_CASE | `USAGE_CRITICAL_THRESHOLD`, `KEYCHAIN_SERVICE` |
+| Constants | SCREAMING_SNAKE_CASE | `USAGE_TIER_CRITICAL`, `KEYCHAIN_SERVICE` |
 | Private EventEmitters | `_` prefix | `_onConfigChanged`, `_onSessionStarted` |
 | Booleans | `is`/`has`/`should`/`use` prefix | `isProcessAlive()`, `useSystemNotifications` |
 
@@ -124,6 +131,7 @@ Five patterns used consistently:
 
 - **Event-driven data flow**: File changes → `refreshData()` → update `cachedData` → `updateUI()`. Never read files from UI code.
 - **All state in `cachedData`**: Single mutable object in `extension.ts`. No global singletons in other modules.
+- **Per-window session selection**: `pickPrimarySession()` in `extension.ts` prefers the active session matching this window's workspace folder(s), falling back to the most recently started session. Model, effort, and reset timer are always derived from this one session, so multiple windows running Claude in different projects never cross-contaminate each other's status bar.
 - **Module-level caches with TTL**: `usageApi.ts` and `jsonlScanner.ts` cache results with explicit TTL constants and `clearCache()` exports.
 - **Disposable pattern required**: Every class that holds resources must implement `vscode.Disposable` with a `dispose()` method.
 - **Platform-aware credentials**: macOS uses Keychain (`/usr/bin/security`), others use `~/.claude/.credentials.json`. Always check `process.platform`.
@@ -142,7 +150,7 @@ Five patterns used consistently:
 | `src/ui/webviewContent.ts` | Dashboard HTML generation (largest file, inline JS/CSS) |
 | `package.json` | Extension manifest: commands, settings schema, activation |
 | `test/__mocks__/vscode.ts` | VS Code API mock — modify when testing new APIs |
-| `esbuild.js` | Build config — single entry, CJS output, external: vscode |
+| `esbuild.js` | Build config — single entry, CJS output, external: vscode, node-notifier |
 
 ## Files To Never Touch
 
@@ -210,14 +218,14 @@ describe('MyModule', () => {
 - **Framework**: Vitest (globals enabled — no manual imports needed)
 - **Mock**: Manual VS Code mock in `test/__mocks__/vscode.ts` (aliased via vitest.config.ts)
 - **Coverage excluded**: `src/ui/webviewContent.ts` (HTML generation)
-- **Run**: `npm test` (74 tests) or `npm run test:coverage`
+- **Run**: `npm test` (213 tests) or `npm run test:coverage`
 - **Pattern**: Setup mock state → call function → assert result → dispose
 
 ## Known Gotchas
 
 - **`package.json` and `configManager.ts` must stay in sync** — config defaults are duplicated in both places. Adding a setting to one without the other causes silent fallback to wrong defaults.
 - **`types.ts` and readers must update together** — adding a field to an interface without updating the corresponding reader means the field is always `undefined`.
-- **`constants.ts` thresholds affect multiple files** — `USAGE_CRITICAL_THRESHOLD` is used in both `statusBar.ts` and `webviewContent.ts` for color coding. Change once, verify both.
+- **`constants.ts` thresholds affect multiple files** — `USAGE_TIER_CRITICAL` is used in both `statusBar.ts` and `webviewContent.ts` for color coding. Change once, verify both.
 - **`webviewContent.ts` contains inline JS/CSS** — no external files. All dashboard logic is string-templated HTML. Easy to break with unescaped quotes.
 - **FileWatcher uses dual strategy (FSWatch + polling)** — `stats-cache.json` is polled via mtime because FSWatch is unreliable for atomic rewrites on some platforms. Don't "simplify" to FSWatch-only.
 - **Module-level caches are NOT class instances** — `usageApi.ts` and `jsonlScanner.ts` use `let cache` at module level. Always export and call `clearCache()` when testing.
@@ -244,10 +252,10 @@ describe('MyModule', () => {
 ## Skills Reference
 
 > Project-specific conventions live in `.data/skills/`. Check before making architectural decisions.
-> Skills available: **extensionDeveloper** (Chrome/VS Code extension development patterns, code style, testing standards)
+> Skills available: **extensionDeveloper** (VS Code extension development patterns, code style, testing standards)
 
 ## Sub-Agent Capabilities
 
 > The extensionDeveloper skill supports sub-agent delegation for complex workflows.
-> Available agents: `code-reviewer` (read-only analysis), `security-auditor` (CSP/permissions audit), `test-writer` (Vitest test generation)
+> Available agents: `code-reviewer` (read-only analysis), `security-auditor` (credential handling, webview, and dependency audit), `test-writer` (Vitest test generation)
 > Ensure `Agent` is in allowed-tools when using these skills.

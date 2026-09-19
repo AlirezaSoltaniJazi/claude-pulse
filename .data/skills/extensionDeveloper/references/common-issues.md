@@ -1,95 +1,80 @@
-# Common Chrome Extension Issues
+# Common Issues in This VS Code Extension
 
-## Service Worker
+## Activation
 
-### "Service worker was destroyed before the message was handled"
-**Cause**: Async message handler didn't return `true` from `onMessage`.
-**Fix**: Always `return true` from `onMessage` listener when response is async.
+### Extension doesn't activate
+**Cause**: `activationEvents` in `package.json` doesn't cover the scenario, or `activate()` throws before wiring finishes.
+**Fix**: This project uses `"activationEvents": ["onStartupFinished"]` — it activates once VS Code's own startup work is done, not on a command or file type. Check the Extension Host output channel for an exception thrown synchronously inside `activate()`.
 
-### "Context invalidated" errors
-**Cause**: Extension was updated or reloaded while content script was still running.
-**Fix**: Wrap all `chrome.runtime.sendMessage` calls in try/catch. Detect invalidation:
-```typescript
-if (!chrome.runtime?.id) {
-  // Extension context invalidated — stop all operations
-  return;
-}
-```
+### Command not found / "command 'claudePulse.x' not found"
+**Cause**: Command id mismatch between `package.json` `contributes.commands` and the string passed to `vscode.commands.registerCommand()` in `extension.ts`.
+**Fix**: The two ids must match exactly, including the `claudePulse.` prefix.
 
-### Service worker not waking for events
-**Cause**: Event listeners registered inside async functions or after a `setTimeout`.
-**Fix**: Register ALL event listeners synchronously at top level of service-worker.ts.
+## Status Bar
 
-### State lost between service worker wake-ups
-**Cause**: Using global variables for state.
-**Fix**: Use `chrome.storage.session` to persist state across terminations.
+### Status bar stuck on "Loading..."
+**Cause**: `StatusBar.update()` hasn't been called yet — its `render()` shows a placeholder until `this.config` is set.
+**Fix**: Confirm `refreshData()`/`updateUI()` ran in `activate()` and that `configManager.getConfig()` didn't throw.
 
-## Content Scripts
+### Background color doesn't match the "five-tier" usage description
+**Cause**: `vscode.ThemeColor` only exposes `statusBarItem.warningBackground` and `statusBarItem.errorBackground` — there is no native "amber" or "info" background tier.
+**Fix**: This is expected. The five logical tiers (`USAGE_TIER_LOW/MEDIUM/HIGH/CRITICAL` in `constants.ts`) drive text/percentage display and the dashboard's colored bars; the status bar item itself only ever switches between undefined / warning / error background.
 
-### Content script not injecting
-**Cause**: `matches` pattern doesn't match the URL, or `run_at` timing is wrong.
-**Fix**: Check `manifest.json` matches pattern. Use `chrome.scripting.executeScript()` for dynamic injection.
+## Webview (Dashboard)
 
-### CSS conflicts with host page
-**Cause**: Content script styles leak into page or page styles leak into injected UI.
-**Fix**: Use shadow DOM (`attachShadow({ mode: 'closed' })`) for all injected UI.
+### Dashboard shows stale data after `Show Dashboard` again
+**Cause**: `DashboardPanel.update()` only rewrites `panel.webview.html` when `isVisible` is true; if the panel was disposed, `show()` must be called again to recreate it.
+**Fix**: Check `dashboardPanel.isVisible` before assuming an update landed.
 
-### Content script can't access page JS variables
-**Cause**: Content scripts run in `ISOLATED` world by default.
-**Fix**: Use `world: "MAIN"` in manifest or `chrome.scripting.executeScript({ world: 'MAIN' })`. Communicate via `window.postMessage`.
+### Clicking a dashboard button does nothing
+**Cause**: The command string sent by the webview's inline script (`vscode.postMessage({ command: 'refreshData' })` in `webviewContent.ts`) doesn't match the string checked in `DashboardPanel`'s `onDidReceiveMessage` handler in `webviewPanel.ts`.
+**Fix**: Keep the `command` string literal identical in both files — there is no shared constant for it today, so this is a manual sync point.
 
-## Message Passing
+### Webview appears blank
+**Cause**: `enableScripts` not set, or an unhandled exception inside `generateDashboardHtml()`'s string templating (e.g. an unescaped value producing invalid HTML).
+**Fix**: `webviewPanel.ts` sets `enableScripts: true` and `retainContextWhenHidden: true` when creating the panel — verify both are still present. If a new dashboard field can contain arbitrary text (from a file or the API), make sure it's escaped before being interpolated into the HTML string.
 
-### sendMessage returns undefined
-**Cause**: No listener registered, or listener didn't call `sendResponse`.
-**Fix**: Ensure service worker has `onMessage` listener. Always call `sendResponse`, even for errors.
+## Configuration
 
-### "Could not establish connection. Receiving end does not exist."
-**Cause**: Sending message to tab without content script, or extension context invalid.
-**Fix**: Check content script is injected before sending. Use try/catch around `chrome.tabs.sendMessage`.
+### Setting change in the Settings UI has no effect
+**Cause**: Most likely the setting exists in `package.json` but was never added to `ConfigManager.getConfig()` (or vice versa), or the extension holds a config snapshot it never refreshes.
+**Fix**: `ConfigManager` listens once at the `claudePulse` namespace level (`e.affectsConfiguration('claudePulse')`) and re-emits the *entire* config object on any change under that namespace — so a missing effect is almost always a missing `cfg.get(...)` line, not a listener problem.
 
-### Port disconnected immediately
-**Cause**: Service worker terminated while port was open.
-**Fix**: Handle `port.onDisconnect` and implement reconnection logic with backoff.
+## File Watching / Model Detection
 
-## Storage
+### Model/effort in the status bar doesn't update after `/model`
+**Cause**: The transcript watch is re-targeted per session via `resolveTranscriptPath()`/`retargetTranscriptWatch()`; if the primary session changed (e.g. a different workspace window) the watch may still be pointed at the old transcript.
+**Fix**: Confirm `pickPrimarySession()` in `extension.ts` resolves to the session you expect — it prefers a session whose `cwd` matches an open workspace folder, then falls back to the most recently started session.
 
-### chrome.storage.local.set silently fails
-**Cause**: Exceeded 10MB quota.
-**Fix**: Monitor usage with `chrome.storage.local.getBytesInUse()`. Clean old data.
+### Model/effort silently stops updating after a while
+**Cause**: `fileWatcher.ts`'s transcript watch is a plain `fs.watch`, which dies permanently if the file's underlying inode is replaced (a rewrite or compaction).
+**Fix**: This is why `fileWatcher.ts` also polls (`WATCH_POLL_INTERVAL_MS`) as a fallback for both `settings.json` and the transcript — don't remove the polling half when "cleaning up" this file.
 
-### Storage changes not detected
-**Cause**: Not listening to `chrome.storage.onChanged`.
-**Fix**: Register listener and check `areaName` parameter:
-```typescript
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && changes.myKey) {
-    // Handle change
-  }
-});
-```
+## Credentials & Usage API
+
+### Status shows `no_credentials`
+**Cause**: No OAuth token found — on macOS, `security find-generic-password -s "Claude Code-credentials"` failed; elsewhere, `~/.claude/.credentials.json` is missing or has no `claudeAiOauth.accessToken`.
+**Fix**: Confirm the user is logged in via the Claude Code CLI. This extension never performs its own OAuth flow — it only reads credentials the CLI already wrote.
+
+### Status shows `auth_error` (401)
+**Cause**: The stored access token expired or was revoked.
+**Fix**: `usageApi.ts` does not implement token refresh yet (see the `refreshToken` TODO comment in `OAuthCredentials`) — ask the user to re-authenticate via the Claude Code CLI, e.g. by reopening a terminal session.
+
+### Status shows `rate_limited`
+**Cause**: The Anthropic usage API returned 429.
+**Fix**: `callUsageApi()` already retries with backoff honoring `Retry-After` (capped by `MAX_BACKOFF_MS`); the opportunistic refresh path additionally backs off for `USAGE_RATE_LIMIT_COOLOFF_MS` after a 429. Don't add another retry loop on top of this — extend the existing one if the behavior needs to change.
+
+## Testing
+
+### `import * as vscode from 'vscode'` fails or returns `undefined` members in a test
+**Cause**: `vitest.config.ts` aliases the `vscode` module to `test/__mocks__/vscode.ts`; a `vscode.*` API used in source but not stubbed in that mock file resolves to `undefined`.
+**Fix**: Add the missing API to `test/__mocks__/vscode.ts` (following the existing `vi.fn()` stub style) rather than reaching for an auto-mocking library.
 
 ## Build & Packaging
 
-### "Refused to execute inline script" in popup/options
-**Cause**: Inline `<script>` tags violate CSP.
-**Fix**: Move all JavaScript to external `.js` files. Reference with `<script src="popup.js"></script>`.
+### `npm run package` fails or produces a stale `.vsix`
+**Cause**: `package` runs `npm run build` (esbuild) then `vsce package --no-update-package-json` — a build error upstream surfaces here.
+**Fix**: Run `npm run build` on its own first to isolate an esbuild/TypeScript error from a `vsce` packaging error.
 
-### "Refused to evaluate a string as JavaScript"
-**Cause**: Using `eval()`, `new Function()`, or template literals with `innerHTML`.
-**Fix**: Remove `eval` usage. Use DOM API (`createElement`, `textContent`) instead of `innerHTML`.
-
-### Extension not loading in Chrome
-**Cause**: Invalid `manifest.json` syntax or schema errors.
-**Fix**: Validate manifest against Chrome's schema. Check `chrome://extensions` for error details.
-
-## Chrome Web Store
-
-### Rejection: "Excessive permissions"
-**Fix**: Replace `tabs` with `activeTab`, remove unused permissions, use `optional_permissions`.
-
-### Rejection: "Remotely hosted code"
-**Fix**: Bundle all code locally. No CDN scripts, no `fetch` + `eval` patterns.
-
-### Rejection: "Missing privacy policy"
-**Fix**: Add privacy policy URL to Chrome Web Store listing. Required if collecting any user data.
+### Full publishing/release process questions
+**Fix**: Don't improvise a publish flow here — see `PUBLISHING.md` at the project root. Releases are cut entirely by the GitHub Actions release workflow; there is no local `vsce publish` step.
