@@ -23,6 +23,22 @@ export function formatDurationShort(ms: number): string {
   return `${minutes}m`;
 }
 
+/**
+ * Duration for a window that can be days away, e.g. '4d 5h', falling back to the hour/minute
+ * form under a day.
+ *
+ * The weekly windows reset up to seven days out, where formatDurationShort's '101h 11m' is
+ * both long and hard to read at a glance — and the status bar pays for every character.
+ */
+export function formatDurationDays(ms: number): string {
+  const totalMinutes = Math.floor(Math.abs(ms) / 60_000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  if (days < 1) return formatDurationShort(ms);
+
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+}
+
 export function formatNumber(n: number): string {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

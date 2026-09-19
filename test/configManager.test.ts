@@ -24,6 +24,9 @@ describe('ConfigManager', () => {
     expect(config.statusBar.showSessionCount).toBe(false);
     expect(config.statusBar.showModel).toBe(true);
     expect(config.statusBar.showEffort).toBe(true);
+    expect(config.statusBar.showCacheWarmth).toBe(false);
+    expect(config.showAgentMap).toBe(true);
+    expect(config.promptCacheTtlMinutes).toBe(60);
     expect(config.sessionResetIntervalMinutes).toBe(300);
     expect(config.sessionTokenLimit).toBe(8_000_000);
     expect(config.pollingIntervalSeconds).toBe(30);
@@ -70,6 +73,19 @@ describe('ConfigManager', () => {
     expect(config.sessionTokenLimit).toBe(4_000_000);
     expect(config.pollingIntervalSeconds).toBe(15);
     expect(config.usageRefreshIntervalSeconds).toBe(120);
+  });
+
+  it('should clamp promptCacheTtlMinutes into its supported range', () => {
+    // A zero TTL renders a permanently-cold cache and a huge one a permanently-warm one;
+    // both read as the feature being broken rather than as a bad setting.
+    setMockConfig({ promptCacheTtlMinutes: 0 });
+    expect(configManager.getConfig().promptCacheTtlMinutes).toBe(1);
+
+    setMockConfig({ promptCacheTtlMinutes: 99_999 });
+    expect(configManager.getConfig().promptCacheTtlMinutes).toBe(1440);
+
+    setMockConfig({ promptCacheTtlMinutes: 5 });
+    expect(configManager.getConfig().promptCacheTtlMinutes).toBe(5);
   });
 
   it('should clamp usageRefreshIntervalSeconds to a minimum of 60', () => {

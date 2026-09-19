@@ -144,6 +144,59 @@ export interface ModelInfo {
   effortSource: EffortSource | null;
   /** True when the owning session's process is alive. Computed in the data layer, never in the UI. */
   isSessionLive: boolean;
+  /**
+   * Epoch ms of the newest record this session's transcript tail proved, or 0 when none.
+   * Lives here because it falls out of the same transcript read the model does — deriving it
+   * separately would mean a second pass over the same bytes on every refresh.
+   */
+  lastActivityAt: number;
+}
+
+/**
+ * How much of the prompt-cache window is left.
+ *
+ * Inferred, not reported: the transcript records when a request happened, never how the server
+ * cached it. So this is last-activity plus an assumed TTL, and every surface that shows it
+ * marks it approximate with the same '~' the estimated reset timer uses.
+ */
+export interface PromptCacheInfo {
+  /** Epoch ms of the last request this session made. */
+  lastActivityAt: number;
+  /** Epoch ms at which the cache is assumed to lapse. */
+  warmUntil: number;
+  /** The assumed TTL, so the UI can explain the number rather than just print it. */
+  ttlMs: number;
+}
+
+/** One subagent spawned by a session, as its `.meta.json` and transcript describe it. */
+export interface AgentInfo {
+  /** File stem, e.g. 'agent-ae5b00c51f07fc683'. Unique within a session. */
+  id: string;
+  /** The task it was given, e.g. 'Crossref review batch 0'. */
+  description: string;
+  /** e.g. 'general-purpose', 'Explore'. */
+  agentType: string;
+  /** 1 for an agent spawned by the main thread, 2 for one spawned by another agent. */
+  spawnDepth: number;
+  /** Id of the spawning agent, or null when the main thread spawned it. */
+  parentAgentId: string | null;
+  /** Every token the agent's own requests consumed, input + output + both cache counters. */
+  tokens: number;
+  /** Last record minus first, or null when the transcript carried no usable timestamps. */
+  durationMs: number | null;
+  /** Assistant turns the agent took. */
+  turns: number;
+  /** Raw model id of its last assistant record, e.g. 'claude-sonnet-5'. */
+  model: string | null;
+}
+
+/** Every subagent one session spawned, plus what they cost in total. */
+export interface AgentMap {
+  sessionId: string;
+  agents: AgentInfo[];
+  totalTokens: number;
+  /** True when the scan stopped at AGENT_SCAN_MAX_AGENTS, so the UI can say so. */
+  truncated: boolean;
 }
 
 export interface ClaudePulseData {
@@ -155,5 +208,9 @@ export interface ClaudePulseData {
   todayActivity: DailyActivity | null;
   usage: ClaudeUsage | null;
   modelInfo: ModelInfo | null;
+  /** Null until a session with a readable transcript is found. */
+  promptCache: PromptCacheInfo | null;
+  /** Null when the dashboard is closed — the scan is too costly to run unobserved. */
+  agents: AgentMap | null;
   usageStatus?: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'no_credentials' | 'error';
 }

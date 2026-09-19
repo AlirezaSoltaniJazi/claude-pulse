@@ -336,6 +336,10 @@ function buildModelInfo(
     isSessionLive
   );
 
+  // The newest thing the transcript proved, whichever record carried it. Zero when the tail
+  // held no parsable timestamp, which callers read as 'unknown', never as 'the epoch'.
+  const lastActivityAt = Math.max(transcript.assistant?.at ?? 0, transcript.command?.at ?? 0);
+
   if (selection.model === null && effort === null) return null;
 
   return {
@@ -344,6 +348,7 @@ function buildModelInfo(
     effort,
     effortSource,
     isSessionLive,
+    lastActivityAt,
   };
 }
 

@@ -1,8 +1,10 @@
 import {
+  AgentMap,
   ClaudePulseData,
   ClaudeUsage,
   DailyActivity,
   ModelUsage,
+  PromptCacheInfo,
   SessionFile,
   WeeklyUsageSummary,
 } from '../types';
@@ -399,6 +401,7 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     <div class="section-content" id="content-usage">
       <div class="grid">
         ${renderUsageCard(data.usage)}
+        ${renderPromptCacheCard(data.promptCache)}
       </div>
     </div>
   </div>
@@ -429,6 +432,8 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       </div>
     </div>
   </div>
+
+  ${renderAgentsSection(data.agents)}
 
   <div class="section">
     <div class="section-header" onclick="toggleSection('activity')">
@@ -853,6 +858,129 @@ function renderModelBreakdownCard(weekly: WeeklyUsageSummary | null): string {
       </thead>
       <tbody>${rows}</tbody>
     </table>
+  </div>`;
+}
+
+/**
+ * How long the prompt cache is expected to stay warm.
+ *
+ * Every number here is prefixed '~' and the card says so in words: the transcript records
+ * when a request happened, never how the server cached it, so this is an inference from the
+ * last request plus an assumed TTL. Presenting it as fact would be the one way to get it wrong.
+ */
+function renderPromptCacheCard(cache: PromptCacheInfo | null): string {
+  if (!cache) {
+    return `<div class="card">
+      <h2>Prompt Cache</h2>
+      <p class="no-data">No session activity to measure from</p>
+    </div>`;
+  }
+
+  const remaining = cache.warmUntil - Date.now();
+  const ttlMinutes = Math.round(cache.ttlMs / 60_000);
+
+  if (remaining <= 0) {
+    return `<div class="card">
+      <h2>Prompt Cache</h2>
+      <span class="stat-highlight" style="color: var(--muted)">Cold</span>
+      <div class="stat-row">
+        <span class="stat-label">Last request</span>
+        <span class="stat-value">${formatDurationShort(Date.now() - cache.lastActivityAt)} ago</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">Next message</span>
+        <span class="stat-value">Reprocesses full context</span>
+      </div>
+    </div>`;
+  }
+
+  const pct = Math.round((remaining / cache.ttlMs) * 100);
+
+  return `<div class="card">
+    <h2>Prompt Cache</h2>
+    <span class="stat-highlight">~${formatDurationShort(remaining)} left</span>
+    <div class="usage-bar-track">
+      <div class="usage-bar-fill" style="background: var(--accent); width: ${pct}%;"></div>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Last request</span>
+      <span class="stat-value">${formatDurationShort(Date.now() - cache.lastActivityAt)} ago</span>
+    </div>
+    <div class="stat-row">
+      <span class="stat-label">Assumed TTL</span>
+      <span class="stat-value">${ttlMinutes}m</span>
+    </div>
+    <div class="usage-bar-info">Estimated from the last request, not reported by Claude Code.</div>
+  </div>`;
+}
+
+/**
+ * The subagents the current session spawned, dearest first.
+ *
+ * Subagents are invisible from the main transcript — one tool call in, no indication that it
+ * cost 60k tokens — and they routinely dominate a session's usage. The section is omitted
+ * entirely rather than shown empty: most sessions spawn none, and a permanent "no agents"
+ * card would be noise on every one of them.
+ */
+function renderAgentsSection(agents: AgentMap | null): string {
+  if (!agents || agents.agents.length === 0) return '';
+
+  const rows = agents.agents
+    .map((agent) => {
+      const share =
+        agents.totalTokens > 0 ? ((agent.tokens / agents.totalTokens) * 100).toFixed(1) : '0.0';
+      // Depth 2+ means an agent spawned by another agent; the indent is the only hierarchy
+      // this view needs, and it survives the cost-ordered sort that a real tree would not.
+      const indent =
+        agent.spawnDepth > 1 ? `style="padding-left: ${(agent.spawnDepth - 1) * 16}px"` : '';
+      return `<tr>
+        <td ${indent}>${escapeHtml(agent.description)}</td>
+        <td>${escapeHtml(agent.agentType)}</td>
+        <td>${escapeHtml(formatModelName(agent.model) || '—')}</td>
+        <td>${agent.turns}</td>
+        <td>${agent.durationMs === null ? '—' : formatDurationShort(agent.durationMs)}</td>
+        <td>${formatNumber(agent.tokens)}</td>
+        <td>${share}%</td>
+      </tr>`;
+    })
+    .join('');
+
+  const truncated = agents.truncated
+    ? `<div class="usage-bar-info">Showing the first ${agents.agents.length} agents only.</div>`
+    : '';
+
+  return `<div class="section">
+    <div class="section-header" onclick="toggleSection('agents')">
+      <span class="section-toggle" id="toggle-agents">&#9660;</span>
+      <h2>Agents</h2>
+    </div>
+    <div class="section-content" id="content-agents">
+      <div class="grid">
+        <div class="card full-width">
+          <h2>Subagents This Session</h2>
+          <span class="stat-highlight">${formatNumber(agents.totalTokens)} tokens</span>
+          <div class="stat-row">
+            <span class="stat-label">Agents</span>
+            <span class="stat-value">${agents.agents.length}</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Type</th>
+                <th>Model</th>
+                <th>Turns</th>
+                <th>Duration</th>
+                <th>Tokens</th>
+                <th>% of Agents</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${truncated}
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 

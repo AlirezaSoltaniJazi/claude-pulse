@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Model-specific usage windows, including Fable.** Claude now reports a separate weekly limit for some
+  models, and the dashboard and status bar tooltip show each one — `This Week (Fable)` alongside the session
+  and all-models bars. Nothing is hardcoded to a model name: whatever windows the API reports are the windows
+  you see, so a model introduced next month appears without an update.
+- **Agents section in the dashboard.** Lists the subagents the current session spawned, dearest first, with the
+  task, agent type, model, turns, duration and tokens for each. Subagents are invisible from the main
+  transcript — one tool call in, no sign that it cost 60k tokens — yet routinely account for most of a
+  session's usage. Turn it off with `claudePulse.showAgentMap`.
+- **Prompt cache countdown.** A "Prompt Cache" card showing roughly how long your prompt cache stays warm, and
+  an optional status bar segment (`$(flame) ~42m`) behind `claudePulse.statusBar.showCacheWarmth`. Coming back
+  before it lapses is cheaper and faster; afterwards the next message reprocesses the whole context. The value
+  is estimated from your last request rather than reported by Claude Code, so it is always marked with `~` —
+  adjust the assumed lifetime with `claudePulse.promptCacheTtlMinutes` if your account is served a shorter one.
+
+### Fixed
+
+- **"Token Breakdown by Model" was permanently empty.** It read a stats file Claude Code no longer writes. It
+  now comes from your session transcripts, which means it also lists every model you actually used, with totals
+  and each one's share of the week.
+- **"Activity by Hour" was permanently empty**, for the same reason, and is now built from transcript timestamps.
+- **No model-specific usage was shown at all.** The weekly Sonnet and Opus windows had moved to a new format in
+  the API and were being read from fields that are now always empty.
+- **Malformed data from the usage API could reach the dashboard unchecked** and render as `NaN%`. The response
+  is now read field by field instead of trusted wholesale.
+- **Model names are escaped before display.** A model id containing angle brackets could previously break the
+  layout of the breakdown table.
+
+### Changed
+
+- Updated build tooling: ESLint 10.8.1, typescript-eslint 8.67.0, esbuild 0.28.2 and `@types/node` 26.2.0.
+  TypeScript stays on 6.0.3 — typescript-eslint has no release that supports TypeScript 7 yet, and linting
+  refuses to run against it. Nothing shipped inside the extension changed.
+
 ## [0.3.0] - 2026-08-01
 
 ### Added

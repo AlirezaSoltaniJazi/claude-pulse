@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { ClaudePulseConfig } from '../config/configManager';
-import { ClaudeUsage, DailyActivity, ModelInfo, SessionFile } from '../types';
+import { ClaudeUsage, DailyActivity, ModelInfo, PromptCacheInfo, SessionFile } from '../types';
 import {
   formatDuration,
+  formatDurationDays,
+  formatDurationShort,
   formatEffortLevel,
   formatModelName,
   formatNumber,
@@ -29,6 +31,7 @@ export class StatusBar implements vscode.Disposable {
   private config: ClaudePulseConfig | null = null;
   private usage: ClaudeUsage | null = null;
   private modelInfo: ModelInfo | null = null;
+  private promptCache: PromptCacheInfo | null = null;
 
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -43,13 +46,15 @@ export class StatusBar implements vscode.Disposable {
     activeSession: SessionFile | null,
     todayActivity: DailyActivity | null,
     usage: ClaudeUsage | null,
-    modelInfo: ModelInfo | null
+    modelInfo: ModelInfo | null,
+    promptCache: PromptCacheInfo | null = null
   ): void {
     this.config = config;
     this.currentSession = activeSession;
     this.todayActivity = todayActivity;
     this.usage = usage;
     this.modelInfo = modelInfo;
+    this.promptCache = promptCache;
     this.render();
   }
 
@@ -188,6 +193,45 @@ export class StatusBar implements vscode.Disposable {
             this.modelInfo.effortSource === 'settings'
               ? `Effort: ${this.modelInfo.effort} (global setting)`
               : `Effort: ${this.modelInfo.effort}`
+          );
+        }
+      }
+    }
+
+    // Prompt cache warmth — always '~', because this is inferred from the last request rather
+    // than reported. Rendered after the model so it never displaces an authoritative value,
+    // and omitted entirely once cold: a countdown that has run out tells the user nothing.
+    if (this.config.statusBar.showCacheWarmth && this.promptCache) {
+      const remaining = this.promptCache.warmUntil - Date.now();
+      if (remaining > 0) {
+        parts.push(`$(flame) ~${formatDurationShort(remaining)}`);
+        tooltipParts.push(
+          `Prompt cache warm for about ${formatDurationShort(remaining)} ` +
+            `(assumes a ${Math.round(this.promptCache.ttlMs / 60_000)}m TTL)`
+        );
+      }
+    }
+
+    // Model-scoped windows, rendered last. Generic on purpose: the segment is built from
+    // whatever the API scoped the window to, so Fable appears today and the next scoped model
+    // appears without a code change.
+    //
+    // Gated on the ROUNDED percentage rather than the raw one — a window at 0.4% would
+    // otherwise render as 'Fable 0%', which reads as a bug rather than as barely-used.
+    if (this.config.statusBar.showScopedUsage) {
+      for (const limit of limits) {
+        if (!limit.modelLabel) continue;
+
+        const pct = Math.round(limit.percent);
+        if (pct <= 0) continue;
+
+        const remaining = limit.resets_at ? new Date(limit.resets_at).getTime() - Date.now() : 0;
+        const resetLabel = remaining > 0 ? ` ${formatDurationDays(remaining)}` : '';
+        parts.push(`${limit.modelLabel} ${pct}%${resetLabel}`);
+
+        if (remaining > 0) {
+          tooltipParts.push(
+            `${limit.modelLabel}: ${pct}% — resets in ${formatDurationDays(remaining)}`
           );
         }
       }

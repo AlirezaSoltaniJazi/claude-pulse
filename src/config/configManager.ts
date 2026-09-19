@@ -3,10 +3,13 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   DEFAULT_POLLING_INTERVAL_SEC,
+  DEFAULT_PROMPT_CACHE_TTL_MINUTES,
   DEFAULT_SESSION_RESET_MINUTES,
   DEFAULT_SESSION_TOKEN_LIMIT,
   DEFAULT_TASK_IDLE_SECONDS,
   DEFAULT_USAGE_REFRESH_INTERVAL_SEC,
+  MAX_PROMPT_CACHE_TTL_MINUTES,
+  MIN_PROMPT_CACHE_TTL_MINUTES,
   MIN_TASK_IDLE_SECONDS,
   MIN_USAGE_REFRESH_INTERVAL_SEC,
 } from '../constants';
@@ -18,7 +21,11 @@ export interface ClaudePulseConfig {
     showSessionCount: boolean;
     showModel: boolean;
     showEffort: boolean;
+    showCacheWarmth: boolean;
+    showScopedUsage: boolean;
   };
+  showAgentMap: boolean;
+  promptCacheTtlMinutes: number;
   sessionResetIntervalMinutes: number;
   sessionTokenLimit: number;
   pollingIntervalSeconds: number;
@@ -63,7 +70,19 @@ export class ConfigManager implements vscode.Disposable {
         showSessionCount: cfg.get<boolean>('statusBar.showSessionCount', false),
         showModel: cfg.get<boolean>('statusBar.showModel', true),
         showEffort: cfg.get<boolean>('statusBar.showEffort', true),
+        showCacheWarmth: cfg.get<boolean>('statusBar.showCacheWarmth', false),
+        showScopedUsage: cfg.get<boolean>('statusBar.showScopedUsage', true),
       },
+      showAgentMap: cfg.get<boolean>('showAgentMap', true),
+      // Clamped: a zero or negative TTL would render a permanently-cold cache, and an
+      // absurdly long one a permanently-warm one. Both look like the feature is broken.
+      promptCacheTtlMinutes: Math.min(
+        MAX_PROMPT_CACHE_TTL_MINUTES,
+        Math.max(
+          MIN_PROMPT_CACHE_TTL_MINUTES,
+          cfg.get<number>('promptCacheTtlMinutes', DEFAULT_PROMPT_CACHE_TTL_MINUTES)
+        )
+      ),
       sessionResetIntervalMinutes: cfg.get<number>(
         'sessionResetIntervalMinutes',
         DEFAULT_SESSION_RESET_MINUTES

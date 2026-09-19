@@ -10,6 +10,7 @@ import {
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
+import { readSessionAgents, clearAgentCache } from './data/agentReader';
 import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
@@ -17,7 +18,7 @@ import { DashboardPanel } from './ui/webviewPanel';
 import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
-import { ClaudePulseData, SessionFile } from './types';
+import { ClaudePulseData, ModelInfo, PromptCacheInfo, SessionFile } from './types';
 import {
   MIN_USAGE_REFRESH_INTERVAL_SEC,
   USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS,
@@ -42,6 +43,8 @@ let cachedData: ClaudePulseData = {
   todayActivity: null,
   usage: null,
   modelInfo: null,
+  promptCache: null,
+  agents: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -100,6 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
       fileWatcher.updateClaudeHomePath(newConfig.claudeHomePath);
       clearScanCache();
       clearModelCache();
+      clearAgentCache();
       void refreshData(false);
       return;
     }
@@ -115,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): void {
     clearScanCache();
     clearUsageCache();
     clearModelCache();
+    clearAgentCache();
     await refreshData(false);
     await refreshUsageData(true, true);
   });
@@ -125,8 +130,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const config = configManager.getConfig();
       // Show immediately with cached data, then refresh
       dashboardPanel.show(cachedData, config.sessionResetIntervalMinutes);
-      // Fetch fresh data in background and update
+      // Fetch fresh data in background and update. refreshData() is what populates the agent
+      // map: until the panel existed it was skipped, so the first open needs a full pass.
       clearUsageCache();
+      await refreshData(false);
       await refreshUsageData(false, true);
     })
   );
@@ -136,6 +143,7 @@ export function activate(context: vscode.ExtensionContext): void {
       clearScanCache();
       clearUsageCache();
       clearModelCache();
+      clearAgentCache();
       await refreshData(false);
       await refreshUsageData(true, true);
     })
@@ -247,6 +255,14 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
   // Only use API data for usage — local file data is stale and unreliable.
   const usage = cachedData.usage;
 
+  // Scanning subagents means reading their transcripts, which dwarf everything else in
+  // ~/.claude. Doing that on every poll for a dashboard nobody is looking at would make the
+  // extension the most expensive thing on the machine, so it is gated on the panel being open.
+  const agents =
+    config.showAgentMap && dashboardPanel.isVisible
+      ? await readSessionAgents(config.claudeHomePath, primarySession)
+      : null;
+
   cachedData = {
     ...cachedData,
     stats,
@@ -257,6 +273,8 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     todayActivity: stats ? getTodayActivity(stats) : null,
     usage,
     modelInfo,
+    promptCache: buildPromptCacheInfo(modelInfo, config.promptCacheTtlMinutes),
+    agents,
   };
 
   // Covers session death/restart, a new session appearing, and the fallback pick changing.
@@ -407,6 +425,23 @@ function showRefreshFeedback(result: FetchUsageResult): void {
   }
 }
 
+/**
+ * Turns the session's last request into a prompt-cache countdown.
+ *
+ * Returns null when nothing has been proven about the session's activity — a countdown from
+ * an unknown start would be worse than no countdown at all.
+ */
+function buildPromptCacheInfo(
+  modelInfo: ModelInfo | null,
+  ttlMinutes: number
+): PromptCacheInfo | null {
+  const lastActivityAt = modelInfo?.lastActivityAt ?? 0;
+  if (lastActivityAt <= 0) return null;
+
+  const ttlMs = ttlMinutes * 60 * 1000;
+  return { lastActivityAt, warmUntil: lastActivityAt + ttlMs, ttlMs };
+}
+
 function updateUI(): void {
   const config = configManager.getConfig();
 
@@ -417,7 +452,8 @@ function updateUI(): void {
     activeSession,
     cachedData.todayActivity,
     cachedData.usage,
-    cachedData.modelInfo
+    cachedData.modelInfo,
+    cachedData.promptCache
   );
 
   if (dashboardPanel.isVisible) {

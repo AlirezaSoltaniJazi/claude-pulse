@@ -67,6 +67,16 @@
           "default": true,
           "description": "Show the model's reasoning effort level (e.g. 'xhigh') in the status bar. Read from the active session transcript, falling back to the global effortLevel in ~/.claude/settings.json."
         },
+        "claudePulse.statusBar.showCacheWarmth": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show an approximate countdown of how long the prompt cache stays warm (e.g. '~59m'). Inferred from the last request, not reported by Claude Code."
+        },
+        "claudePulse.statusBar.showScopedUsage": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show model-specific weekly usage in the status bar once it registers above 0% (e.g. 'Fable 2% 4d 5h'). These windows are sub-caps within the overall weekly limit."
+        },
         "claudePulse.sessionResetIntervalMinutes": {
           "type": "number",
           "default": 300,
@@ -134,6 +144,18 @@
           "type": "string",
           "default": "",
           "description": "Custom path to .claude directory (leave empty for ~/.claude)"
+        },
+        "claudePulse.showAgentMap": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Agents section in the dashboard, listing the subagents the current session spawned and what each one cost. Scanning reads subagent transcripts, so it runs only while the dashboard is open."
+        },
+        "claudePulse.promptCacheTtlMinutes": {
+          "type": "number",
+          "default": 60,
+          "minimum": 1,
+          "maximum": 1440,
+          "description": "How long the prompt cache is assumed to stay warm, in minutes. Lower this if you are on an account served a shorter cache TTL."
         }
       }
     }
@@ -182,14 +204,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "@types/vscode": "~1.85.0",
-    "@typescript-eslint/eslint-plugin": "^8.65.0",
-    "@typescript-eslint/parser": "^8.65.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "@vitest/coverage-v8": "^4.1.10",
     "@vscode/vsce": "^3.9.2",
-    "esbuild": "^0.28.1",
-    "eslint": "^10.8.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",

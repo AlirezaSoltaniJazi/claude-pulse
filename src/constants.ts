@@ -101,3 +101,29 @@ export const DEFAULT_USAGE_REFRESH_INTERVAL_SEC = 3600;
 export const MIN_USAGE_REFRESH_INTERVAL_SEC = 60;
 export const DEFAULT_SESSION_RESET_MINUTES = 300;
 export const DEFAULT_SESSION_TOKEN_LIMIT = 8_000_000;
+
+// Prompt Cache
+/**
+ * How long Claude Code's prompt prefix stays cached, refreshed on every request.
+ *
+ * This is an assumption about the client's behaviour, not something the transcript records,
+ * which is why the countdown derived from it is always presented as approximate and the value
+ * is overridable via `claudePulse.promptCacheTtlMinutes`. Accounts in usage overage are served
+ * a shorter TTL, so a user who sees the countdown run long can dial it down.
+ */
+export const DEFAULT_PROMPT_CACHE_TTL_MINUTES = 60;
+export const MIN_PROMPT_CACHE_TTL_MINUTES = 1;
+export const MAX_PROMPT_CACHE_TTL_MINUTES = 1440;
+
+// Agent Map
+/** Subdirectory of `<projects>/<project>/<sessionId>/` holding one file pair per subagent. */
+export const AGENT_SUBDIR = 'subagents';
+export const AGENT_META_SUFFIX = '.meta.json';
+/**
+ * Scanning a session's subagents means reading their full transcripts — 64 MB for a single
+ * 95-agent session in the wild. Individual files are cached on (mtime, size) so a finished
+ * agent is read exactly once; this TTL only bounds how often the directory is re-listed.
+ */
+export const AGENT_SCAN_CACHE_TTL_MS = 15_000;
+/** Hard bound on agents read per scan, so a pathological session cannot stall the extension. */
+export const AGENT_SCAN_MAX_AGENTS = 500;
