@@ -1,8 +1,8 @@
 # Claude Pulse
 
-Monitor Claude Code usage, sessions, and token consumption directly from your VS Code status bar.
+Monitor Claude Code usage, sessions, subagents and token consumption directly from your VS Code status bar.
 
-Claude Pulse gives you real-time visibility into your Claude Code activity — usage percentages across rate-limit windows, session reset countdowns, token breakdowns by model, and weekly usage trends — all without leaving your editor.
+Claude Pulse gives you real-time visibility into your Claude Code activity — usage percentages across rate-limit windows, session reset countdowns, token breakdowns by model, and weekly usage trends — plus a map of every Claude session on your machine and the subagents it spawned, with a button to terminate a session that has run away. All without leaving your editor.
 
 ## Features
 
@@ -11,6 +11,8 @@ Claude Pulse gives you real-time visibility into your Claude Code activity — u
 - Live usage percentage (max across 5-hour and 7-day windows)
 - Session reset countdown timer (from API or estimated)
 - Current model and reasoning effort level (e.g. `Opus 5 · xhigh`), each shown/hidden independently
+- Model-specific weekly usage once it registers (e.g. `Fable 2% 4d 5h`) — a sub-cap within the weekly limit
+- Optional approximate prompt-cache countdown (e.g. `~42m`), so you know whether coming back now is cheap
 - Optional message count and session count display
 - Five-tier color-coded usage: blue (<25%), green (25-49%), amber (50-69%), orange (70-89%), red (90%+)
 
@@ -20,18 +22,28 @@ Claude Pulse gives you real-time visibility into your Claude Code activity — u
 
 Open with the **Claude Pulse: Show Dashboard** command to see:
 
-- **Usage bars** — Current session (5h), weekly (all models), weekly (Sonnet), weekly (Opus), and extra usage
+- **Usage bars** — Every rate-limit window the API reports: current session (5h), weekly (all models), model-specific weekly windows such as `This Week (Fable)`, and extra usage
+- **Prompt cache** — Roughly how long your prompt cache stays warm, estimated from your last request
 - **Session info** — Active session PID, working directory, duration, and reset time
 - **Weekly summary** — Total tokens, messages, sessions, and tool calls for the current week
 - **Sonnet breakdown** — Sonnet token usage and percentage of total
 - **Lifetime stats** — Total tokens, favorite model, total sessions and messages, first session date, longest session, active-day streaks, and most active day
 - **Model breakdown** — Token usage table by model (input, output, cache read, cache create)
 - **Hourly activity chart** — Visual bar chart of activity distribution by hour
+- **Agents** — The subagents the current session spawned, costliest first, with task, type, model, turns, duration and tokens
 - **Agent graph** — A tab per agent type showing the sessions that ran it, plus a **Sessions** tab with each
   session's full subagent tree. Every run shows its type, model, turns, cost and status (running, completed,
   stopped, never finished), and every session carries a button to terminate it
 
 ![Dashboard](https://raw.githubusercontent.com/AlirezaSoltaniJazi/claude-pulse/main/media/screenshot-dashboard.png)
+
+### Agents & Session Control
+
+- **See every session on the machine** — not just this window's — with the subagents each one spawned, including agents spawned by other agents
+- **Browse by agent type** — one tab per type (`general-purpose`, `Explore`, …) to compare its runs across sessions, or the **Sessions** tab for each session's full tree
+- **Lifecycle status per run** — running, completed, stopped by you, or never finished — read from the transcripts, with running agents always listed first
+- **Terminate a session** — from its node in the graph, or with **Claude Pulse: Terminate a Claude Session**. Every termination is confirmed first and sends `SIGTERM` so Claude Code saves its transcript on the way out; `SIGKILL` is offered only if that is ignored
+- **Stop a running subagent** — subagents run inside their session's process, so this terminates that session, and the confirmation says so and names the other agents that go with it
 
 ### Real-Time Monitoring
 
@@ -114,6 +126,8 @@ Claude Pulse reads data from two sources:
 1. **Local files** (`~/.claude/`) — Claude Code writes session files, stats cache, and JSONL session logs to this directory. Claude Pulse watches these files for changes and aggregates weekly usage from JSONL logs.
 
 2. **Anthropic API** (`api.anthropic.com/api/oauth/usage`) — When OAuth credentials are available, Claude Pulse fetches live usage percentages and reset times. Credentials are read from the macOS Keychain or `~/.claude/.credentials.json` — the extension never stores credentials itself.
+
+Subagent transcripts are by far the largest files Claude Code writes, so the Agents and Agent Graph sections read them only while the dashboard is open, and each finished agent is read once and then cached. The only action Claude Pulse ever takes beyond reading is terminating a session, and only when you confirm it.
 
 ## Privacy & Security
 
