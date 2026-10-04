@@ -47,6 +47,14 @@ export interface SessionFile {
   sessionId: string;
   cwd: string;
   startedAt: number;
+  /** Claude Code's own derived label for the session, e.g. 'claude-pulse-f4'. Absent on older files. */
+  name?: string;
+  /** How the session was launched, e.g. 'cli', 'claude-vscode'. */
+  entrypoint?: string;
+  /** e.g. 'interactive'. Present so a non-interactive session is never offered a kill button. */
+  kind?: string;
+  /** Claude Code version that wrote the file, e.g. '2.1.278'. */
+  version?: string;
 }
 
 /** Per-model token counts, split the same four ways the transcripts report them. */
@@ -188,7 +196,21 @@ export interface AgentInfo {
   turns: number;
   /** Raw model id of its last assistant record, e.g. 'claude-sonnet-5'. */
   model: string | null;
+  /** Where the agent is in its lifecycle. See deriveAgentStatus() for how each value is proven. */
+  status: AgentStatus;
+  /** Epoch ms of the newest record in its transcript, or 0 when it has written none. */
+  lastActivityAt: number;
 }
+
+/**
+ * An agent's lifecycle state, as far as the files on disk can prove it.
+ *
+ *  - 'running'   — the owning session is alive and the transcript does not show a finished turn.
+ *  - 'completed' — its last assistant record carried a terminal stop_reason. Authoritative.
+ *  - 'stopped'   — its own meta file records `stoppedByUser`. Authoritative.
+ *  - 'orphaned'  — unfinished, but the session that owned it is gone. Nothing will resume it.
+ */
+export type AgentStatus = 'running' | 'completed' | 'stopped' | 'orphaned';
 
 /** Every subagent one session spawned, plus what they cost in total. */
 export interface AgentMap {
@@ -196,6 +218,101 @@ export interface AgentMap {
   agents: AgentInfo[];
   totalTokens: number;
   /** True when the scan stopped at AGENT_SCAN_MAX_AGENTS, so the UI can say so. */
+  truncated: boolean;
+}
+
+/**
+ * One subagent as a node in the graph, with the agents it spawned hanging off it.
+ *
+ * Same data as AgentInfo — the tree is built by linking parentAgentId, so a node is never a
+ * copy of an agent, just a view of one with its children resolved.
+ */
+export interface AgentNode extends AgentInfo {
+  children: AgentNode[];
+  /** This agent's own tokens plus every descendant's. What the node is worth killing over. */
+  subtreeTokens: number;
+}
+
+/**
+ * One session and the subagent tree beneath it.
+ *
+ * `pid` is the only thing in the whole graph that can actually be signalled: subagents share
+ * their session's process, so this is the unit of termination. See src/data/processControl.ts.
+ */
+export interface SessionNode {
+  sessionId: string;
+  pid: number;
+  cwd: string;
+  /** Basename of cwd, or the session's own name when it has one. For display only. */
+  label: string;
+  startedAt: number;
+  /** Whether the process is still alive, as of the scan that built this node. */
+  isAlive: boolean;
+  entrypoint: string | null;
+  /** True when this is the session the status bar describes for this window. */
+  isPrimary: boolean;
+  /** Raw model id, resolved only for the primary session — the others are not read. */
+  model: string | null;
+  agents: AgentNode[];
+  /** Total agents in the tree, including nested ones, before truncation. */
+  agentCount: number;
+  /** Tokens across every agent in the tree. Excludes the session's own main-thread usage. */
+  totalTokens: number;
+  /** Newest transcript record across the session's agents, or 0 when it spawned none. */
+  lastActivityAt: number;
+  /** True when this session's scan stopped at AGENT_SCAN_MAX_AGENTS. */
+  truncated: boolean;
+}
+
+/**
+ * One run of an agent type inside one session.
+ *
+ * Carries the node rather than copying it, plus the one fact the type-first view needs that
+ * the node itself cannot supply: who spawned it. In the session-first tree that is implicit
+ * in the nesting; here the parent may well be an agent of a DIFFERENT type, sitting under a
+ * different tab, so it has to be named.
+ */
+export interface AgentTypeInstance {
+  agent: AgentNode;
+  /** The spawning agent's description, or null when the session's main thread spawned it. */
+  parentDescription: string | null;
+}
+
+/** The runs of one agent type that happened inside one session. */
+export interface AgentTypeSession {
+  session: SessionNode;
+  /** Flat: every run of this type in this session, at any spawn depth. */
+  instances: AgentTypeInstance[];
+  runningCount: number;
+  totalTokens: number;
+}
+
+/**
+ * One agent type, with every session that ran it.
+ *
+ * This is the AgentGraph inverted. The graph is keyed by session because that is how the
+ * files are laid out and because the session is the only thing that can be terminated; this
+ * is keyed by agent type because that is the reusable definition — the same `general-purpose`
+ * runs in a dozen sessions, and comparing those runs is a question the session-first tree
+ * cannot answer at all.
+ */
+export interface AgentTypeGroup {
+  /** e.g. 'general-purpose'. Also the stable key the selected tab is remembered by. */
+  agentType: string;
+  /** Total runs across every session. */
+  count: number;
+  runningCount: number;
+  totalTokens: number;
+  /** Sessions that ran this type, live ones first. Never empty. */
+  sessions: AgentTypeSession[];
+}
+
+/** Every session on disk with its subagents — the data behind the agent graph view. */
+export interface AgentGraph {
+  sessions: SessionNode[];
+  /** Epoch ms the scan completed, so the view can say how fresh it is. */
+  generatedAt: number;
+  /** True when the scan stopped at AGENT_GRAPH_MAX_SESSIONS. */
   truncated: boolean;
 }
 
@@ -212,5 +329,7 @@ export interface ClaudePulseData {
   promptCache: PromptCacheInfo | null;
   /** Null when the dashboard is closed — the scan is too costly to run unobserved. */
   agents: AgentMap | null;
+  /** Same gating as `agents`: only populated while the dashboard is open. */
+  agentGraph: AgentGraph | null;
   usageStatus?: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'no_credentials' | 'error';
 }

@@ -67,7 +67,6 @@ interface ScanResult {
 }
 
 interface TranscriptPathCache {
-  sessionId: string;
   /** Null is cached too — it stops the directory scan repeating on every poll. */
   transcriptPath: string | null;
   timestamp: number;
@@ -79,7 +78,15 @@ interface SettingsCache {
 }
 
 let transcriptEvidenceCache: TranscriptEvidenceCache | null = null;
-let transcriptPathCache: TranscriptPathCache | null = null;
+/**
+ * Keyed by session id, not a single slot.
+ *
+ * One slot was enough while only the primary session's path was ever resolved. The agent
+ * graph resolves a path per session, and with a single slot each of those calls would evict
+ * the primary session's entry — turning the status bar's every-poll lookup back into a
+ * directory scan. Bounded by the sessions directory, which Claude Code prunes.
+ */
+const transcriptPathCache = new Map<string, TranscriptPathCache>();
 let settingsCache: SettingsCache | null = null;
 
 /**
@@ -122,7 +129,7 @@ export async function readModelInfo(
 
 export function clearModelCache(): void {
   transcriptEvidenceCache = null;
-  transcriptPathCache = null;
+  transcriptPathCache.clear();
   settingsCache = null;
 }
 
@@ -237,12 +244,8 @@ export async function resolveTranscriptPath(
   claudeHomePath: string,
   session: SessionFile
 ): Promise<string | null> {
-  const cached = transcriptPathCache;
-  if (
-    cached &&
-    cached.sessionId === session.sessionId &&
-    Date.now() - cached.timestamp < MODEL_INFO_CACHE_TTL_MS
-  ) {
+  const cached = transcriptPathCache.get(session.sessionId);
+  if (cached && Date.now() - cached.timestamp < MODEL_INFO_CACHE_TTL_MS) {
     return cached.transcriptPath;
   }
 
@@ -278,11 +281,7 @@ export async function resolveTranscriptPath(
     }
   }
 
-  transcriptPathCache = {
-    sessionId: session.sessionId,
-    transcriptPath: resolved,
-    timestamp: Date.now(),
-  };
+  transcriptPathCache.set(session.sessionId, { transcriptPath: resolved, timestamp: Date.now() });
   return resolved;
 }
 

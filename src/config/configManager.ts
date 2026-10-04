@@ -25,6 +25,7 @@ export interface ClaudePulseConfig {
     showScopedUsage: boolean;
   };
   showAgentMap: boolean;
+  showAgentGraph: boolean;
   promptCacheTtlMinutes: number;
   sessionResetIntervalMinutes: number;
   sessionTokenLimit: number;
@@ -74,6 +75,7 @@ export class ConfigManager implements vscode.Disposable {
         showScopedUsage: cfg.get<boolean>('statusBar.showScopedUsage', true),
       },
       showAgentMap: cfg.get<boolean>('showAgentMap', true),
+      showAgentGraph: cfg.get<boolean>('showAgentGraph', true),
       // Clamped: a zero or negative TTL would render a permanently-cold cache, and an
       // absurdly long one a permanently-warm one. Both look like the feature is broken.
       promptCacheTtlMinutes: Math.min(
