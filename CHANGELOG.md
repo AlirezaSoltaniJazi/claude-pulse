@@ -28,6 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming the other agents that go down with it. There is no way to stop a single subagent from outside
   Claude Code.
 
+### Security
+
+- **Cleared all 16 dependency advisories (11 high, 5 moderate).** None were in the shipped extension — every
+  one was in build and test tooling — but they ran on every developer machine and in CI. `vitest` and
+  `@vitest/coverage-v8` move to 4.1.11 for a path-traversal fix, and `@vscode/vsce` moves to 4.0, which is the
+  only way out of a `braces` denial-of-service that has no patched release. vsce 4 needs Node 22, so the
+  release workflow now runs on Node 22. The packaged extension contains exactly the same files as before.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added

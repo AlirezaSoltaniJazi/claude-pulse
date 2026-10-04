@@ -217,8 +217,8 @@
     "@types/vscode": "~1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
-    "@vitest/coverage-v8": "^4.1.10",
-    "@vscode/vsce": "^3.9.2",
+    "@vitest/coverage-v8": "^4.1.11",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
@@ -226,6 +226,6 @@
     "lint-staged": "^17.3.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
