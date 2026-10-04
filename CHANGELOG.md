@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-04
+
 ## [1.1.0] - 2026-10-04
 
 ### Added
@@ -295,7 +297,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable settings: polling intervals, notification preferences, session reset interval, custom Claude home path
 - Commands: Show Dashboard, Refresh Data, Reset Timer, Toggle Notifications
 
-[Unreleased]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v0.3.0...v1.0.0
 [0.3.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v0.2.7...v0.3.0

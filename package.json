@@ -2,7 +2,7 @@
   "name": "claude-pulse-monitor",
   "displayName": "Claude Pulse Monitor",
   "description": "Monitor Claude Code usage, sessions, subagents and token consumption from your VS Code status bar — and terminate runaway sessions from the dashboard.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "publisher": "AlirezaSoltaniJazi",
   "license": "MIT",
   "repository": {
