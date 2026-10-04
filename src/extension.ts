@@ -10,15 +10,21 @@ import {
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
-import { readSessionAgents, clearAgentCache } from './data/agentReader';
+import { readSessionAgents, readAgentGraph, clearAgentCache } from './data/agentReader';
+import {
+  buildKillConfirmation,
+  killSession,
+  resolveKillTarget,
+  KillResult,
+} from './data/processControl';
 import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
-import { DashboardPanel } from './ui/webviewPanel';
+import { DashboardPanel, KillRequest } from './ui/webviewPanel';
 import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
-import { ClaudePulseData, ModelInfo, PromptCacheInfo, SessionFile } from './types';
+import { AgentNode, ClaudePulseData, ModelInfo, PromptCacheInfo, SessionFile } from './types';
 import {
   MIN_USAGE_REFRESH_INTERVAL_SEC,
   USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS,
@@ -45,6 +51,7 @@ let cachedData: ClaudePulseData = {
   modelInfo: null,
   promptCache: null,
   agents: null,
+  agentGraph: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -115,6 +122,7 @@ export function activate(context: vscode.ExtensionContext): void {
   dashboardPanel.onResetTimer(() => {
     statusBar.resetTimer();
   });
+  dashboardPanel.onKillRequested((request) => void handleKillRequest(request));
   dashboardPanel.onRefreshData(async () => {
     clearScanCache();
     clearUsageCache();
@@ -147,6 +155,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await refreshData(false);
       await refreshUsageData(true, true);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('claudePulse.killSession', () => void pickAndKillSession())
   );
 
   context.subscriptions.push(
@@ -263,6 +275,22 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
       ? await readSessionAgents(config.claudeHomePath, primarySession)
       : null;
 
+  // The graph is gated on the panel for the same reason as the table, but on its own setting:
+  // the two answer different questions and either is worth having without the other.
+  //
+  // Sequential rather than beside the table read on purpose. Both walk the same subagent
+  // transcripts for the primary session, and transcriptStatsCache is populated on completion,
+  // so running them concurrently would have both miss the cache and read those files twice.
+  const agentGraph =
+    config.showAgentGraph && dashboardPanel.isVisible
+      ? await readAgentGraph(
+          config.claudeHomePath,
+          sessions,
+          primarySession?.sessionId ?? null,
+          modelInfo?.model ?? null
+        )
+      : null;
+
   cachedData = {
     ...cachedData,
     stats,
@@ -275,6 +303,7 @@ async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
     modelInfo,
     promptCache: buildPromptCacheInfo(modelInfo, config.promptCacheTtlMinutes),
     agents,
+    agentGraph,
   };
 
   // Covers session death/restart, a new session appearing, and the fallback pick changing.
@@ -440,6 +469,135 @@ function buildPromptCacheInfo(
 
   const ttlMs = ttlMinutes * 60 * 1000;
   return { lastActivityAt, warmUntil: lastActivityAt + ttlMs, ttlMs };
+}
+
+/**
+ * Confirms and carries out a termination request from the dashboard.
+ *
+ * The confirmation is modal and lives here rather than in the webview for two reasons: the
+ * panel rewrites its own HTML on every poll, so an in-page dialog can be swept away
+ * mid-decision, and a webview cannot be trusted as the record of what the user agreed to.
+ */
+async function handleKillRequest(request: KillRequest): Promise<void> {
+  // Re-validated against the CURRENT session list, not the one the panel was rendered from.
+  // A button can sit on screen for a whole poll interval, which is long enough for the
+  // session to exit and the OS to hand its PID to something else.
+  if (!resolveKillTarget(request.pid, request.sessionId, cachedData.sessions)) {
+    vscode.window.showWarningMessage(
+      `Claude Pulse: session ${request.label} (PID ${request.pid}) is no longer running — nothing was signalled.`
+    );
+    await refreshAfterKill();
+    return;
+  }
+
+  const confirmation = buildKillConfirmation({
+    label: request.label,
+    pid: request.pid,
+    agentDescription: request.agentDescription,
+    runningAgents: countRunningAgents(request.sessionId),
+  });
+
+  const choice = await vscode.window.showWarningMessage(
+    confirmation.message,
+    { modal: true, detail: confirmation.detail },
+    confirmation.confirmLabel
+  );
+  if (choice !== confirmation.confirmLabel) return;
+
+  const result = await killSession(request.pid, request.sessionId, cachedData.sessions);
+  await reportKillResult(result, request);
+  await refreshAfterKill();
+}
+
+/**
+ * Reports the outcome, offering SIGKILL only once SIGTERM has demonstrably been ignored.
+ *
+ * Force is never the first offer: a session that is mid-request takes a moment to unwind,
+ * and a SIGKILL skips the transcript flush and leaves the session file behind for the
+ * extension to keep listing.
+ */
+async function reportKillResult(result: KillResult, request: KillRequest): Promise<void> {
+  if (result.outcome === 'terminated') {
+    vscode.window.showInformationMessage(`Claude Pulse: ${result.message}`);
+    return;
+  }
+
+  if (result.outcome === 'signalled') {
+    const force = await vscode.window.showWarningMessage(
+      result.message,
+      {
+        modal: true,
+        detail: 'Force kill skips the transcript flush. Use it only if the session is wedged.',
+      },
+      'Force Kill'
+    );
+    if (force !== 'Force Kill') return;
+
+    const forced = await killSession(request.pid, request.sessionId, cachedData.sessions, {
+      force: true,
+    });
+    vscode.window.showInformationMessage(`Claude Pulse: ${forced.message}`);
+    return;
+  }
+
+  vscode.window.showWarningMessage(`Claude Pulse: ${result.message}`);
+}
+
+/** Every cache keyed to the session list is stale the moment a session dies. */
+async function refreshAfterKill(): Promise<void> {
+  clearAgentCache();
+  clearModelCache();
+  await refreshData(false);
+}
+
+/** Running agents in one session, counted off the graph the panel is currently showing. */
+function countRunningAgents(sessionId: string): number {
+  const session = cachedData.agentGraph?.sessions.find((s) => s.sessionId === sessionId);
+  if (!session) return 0;
+
+  const count = (agents: AgentNode[]): number =>
+    agents.reduce(
+      (sum, agent) => sum + (agent.status === 'running' ? 1 : 0) + count(agent.children),
+      0
+    );
+  return count(session.agents);
+}
+
+/**
+ * Command-palette route to the same termination path.
+ *
+ * Worth having separately from the graph: the dashboard has to be open for the graph to be
+ * populated at all, and a wedged session is exactly the situation where the user wants to
+ * reach for a command rather than wait for a panel to scan the filesystem.
+ */
+async function pickAndKillSession(): Promise<void> {
+  const live = cachedData.activeSessions;
+  if (live.length === 0) {
+    vscode.window.showInformationMessage('Claude Pulse: no running Claude sessions found.');
+    return;
+  }
+
+  const items = live
+    .slice()
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .map((session) => ({
+      label: session.name ?? session.cwd ?? session.sessionId.slice(0, 8),
+      description: `PID ${session.pid}`,
+      detail: session.cwd,
+      session,
+    }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'Terminate a Claude session',
+    placeHolder: 'Select the session to terminate',
+  });
+  if (!picked) return;
+
+  await handleKillRequest({
+    pid: picked.session.pid,
+    sessionId: picked.session.sessionId,
+    label: picked.label,
+  });
 }
 
 function updateUI(): void {

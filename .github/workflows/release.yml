@@ -59,7 +59,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 22, not 20: this job runs `vsce package` and `vsce publish`, and @vscode/vsce 4
+          # requires Node >= 22. The bump to vsce 4 is what drops the secretlint -> globby ->
+          # micromatch -> braces chain, and braces has no patched release at all.
+          node-version: 22
           cache: npm
 
       - name: Configure git identity

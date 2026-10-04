@@ -110,6 +110,10 @@ describe('readSessionAgents', () => {
       durationMs: 30_000,
       turns: 2,
       model: 'claude-sonnet-5',
+      // No terminal stop_reason in the fixture and pid 1 is not a session we can signal, so
+      // the agent reads as never finished. deriveAgentStatus() owns that rule; see its tests.
+      status: 'orphaned',
+      lastActivityAt: Date.parse('2026-09-19T10:00:30Z'),
     });
   });
 

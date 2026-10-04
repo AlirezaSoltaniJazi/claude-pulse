@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agent Graph in the dashboard.** A tab per agent type — `general-purpose`, `Explore`, whatever your
+  sessions actually ran — each showing the sessions that ran it, with that type's runs beneath each session.
+  A leading **Sessions** tab holds the other direction: every session with its full subagent tree, nested
+  subagents included, and it is where a session that spawned no agents at all still appears. Session nodes
+  are purple, subagents teal, connected by the spawn links from each agent's own metadata. Each run shows
+  its type, model, turns, duration, token cost and a status — running, completed, stopped by the user, or
+  never finished — plus, in a type tab, which agent spawned it. The selected tab survives the dashboard's
+  refresh. Turn the section off with `claudePulse.showAgentGraph`.
+- **Terminate a session from the dashboard or the command palette.** Session nodes carry a Kill button, and
+  **Claude Pulse: Terminate a Claude Session** reaches the same path without opening the dashboard. Both
+  confirm first, send `SIGTERM` so Claude Code flushes its transcript on the way out, and offer `SIGKILL`
+  only after the polite signal has demonstrably been ignored. A PID is only ever signalled when it still
+  matches a known session's id, so a button left on screen by a stale render cannot be aimed at a recycled
+  PID.
+- **Stop button on a running subagent.** Subagents have no process of their own — they run inside their
+  session — so this terminates the session that owns the agent, and the confirmation says exactly that,
+  naming the other agents that go down with it. There is no way to stop a single subagent from outside
+  Claude Code.
+
+### Security
+
+- **Cleared all 16 dependency advisories (11 high, 5 moderate).** None were in the shipped extension — every
+  one was in build and test tooling — but they ran on every developer machine and in CI. `vitest` and
+  `@vitest/coverage-v8` move to 4.1.11 for a path-traversal fix, and `@vscode/vsce` moves to 4.0, which is the
+  only way out of a `braces` denial-of-service that has no patched release. vsce 4 needs Node 22, so the
+  release workflow now runs on Node 22. The packaged extension contains exactly the same files as before.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added

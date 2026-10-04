@@ -1,7 +1,7 @@
 {
   "name": "claude-pulse-monitor",
   "displayName": "Claude Pulse Monitor",
-  "description": "Monitor Claude Code usage, sessions, and token consumption from your VS Code status bar.",
+  "description": "Monitor Claude Code usage, sessions, subagents and token consumption from your VS Code status bar — and terminate runaway sessions from the dashboard.",
   "version": "1.0.0",
   "publisher": "AlirezaSoltaniJazi",
   "license": "MIT",
@@ -14,6 +14,18 @@
   },
   "categories": [
     "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "usage",
+    "rate limit",
+    "tokens",
+    "subagents",
+    "agents",
+    "sessions",
+    "status bar"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -29,6 +41,10 @@
       {
         "command": "claudePulse.refreshData",
         "title": "Claude Pulse: Refresh Data"
+      },
+      {
+        "command": "claudePulse.killSession",
+        "title": "Claude Pulse: Terminate a Claude Session"
       },
       {
         "command": "claudePulse.resetTimer",
@@ -150,6 +166,11 @@
           "default": true,
           "description": "Show the Agents section in the dashboard, listing the subagents the current session spawned and what each one cost. Scanning reads subagent transcripts, so it runs only while the dashboard is open."
         },
+        "claudePulse.showAgentGraph": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Agent Graph section in the dashboard: every Claude session on this machine with the subagents it spawned, and a button to terminate a session. Scans only while the dashboard is open."
+        },
         "claudePulse.promptCacheTtlMinutes": {
           "type": "number",
           "default": 60,
@@ -208,8 +229,8 @@
     "@types/vscode": "~1.85.0",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
-    "@vitest/coverage-v8": "^4.1.10",
-    "@vscode/vsce": "^3.9.2",
+    "@vitest/coverage-v8": "^4.1.11",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
@@ -217,6 +238,6 @@
     "lint-staged": "^17.3.0",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

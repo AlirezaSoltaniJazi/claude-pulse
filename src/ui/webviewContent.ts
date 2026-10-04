@@ -1,16 +1,25 @@
 import {
+  AgentGraph,
   AgentMap,
+  AgentNode,
+  AgentStatus,
+  AgentTypeGroup,
   ClaudePulseData,
   ClaudeUsage,
   DailyActivity,
   ModelUsage,
   PromptCacheInfo,
   SessionFile,
+  SessionNode,
   WeeklyUsageSummary,
 } from '../types';
 import { formatDurationShort, formatModelName, formatNumber } from '../utils/formatting';
 import { limitLabel, resolveLimits } from '../utils/usageLimits';
+import { groupAgentsByType } from '../utils/agentGrouping';
 import {
+  AGENT_GRAPH_CHIP_TYPES,
+  AGENT_GRAPH_MAX_NODES_PER_LEVEL,
+  AGENT_GRAPH_NODES_PER_LEVEL,
   USAGE_TIER_LOW,
   USAGE_TIER_MEDIUM,
   USAGE_TIER_HIGH,
@@ -22,6 +31,12 @@ import {
  *
  * Model ids come from transcript files and window labels come from the API, so neither is
  * ours to trust: '<synthetic>' alone is enough to swallow the rest of a row as a bogus tag.
+ *
+ * This is the ONLY escaper, which is why the graph's buttons carry their payload in data-*
+ * attributes and dispatch through one delegated listener. An `onclick="f('${...}')"` would
+ * put the value in two nested contexts at once — the HTML parser decodes `&#39;` back to a
+ * quote before the JS is ever compiled, so entity-escaping is exactly the wrong defence
+ * there, and an agent description is model-authored text that reaches this file verbatim.
  */
 function escapeHtml(value: string): string {
   return value
@@ -31,6 +46,13 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+/**
+ * Key of the session-first tab. Not a valid agent type, so it can never collide with one:
+ * agent types come from meta files and are non-empty, and this starts with a character a
+ * type identifier does not use.
+ */
+const SESSIONS_TAB_KEY = '@sessions';
 
 function usageColor(pct: number): string {
   if (pct >= USAGE_TIER_CRITICAL) return 'var(--error)';
@@ -96,7 +118,33 @@ function getSubtitleText(data: ClaudePulseData): string {
   return 'No data available';
 }
 
-export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinutes: number): string {
+/**
+ * View state the panel owns rather than the data layer.
+ *
+ * It lives outside ClaudePulseData because it is not something read off the disk: it is what
+ * the user last clicked. The panel rewrites its entire HTML on every poll, so any selection
+ * held only in the DOM is thrown away every few seconds — this is what carries it across.
+ */
+export interface DashboardViewState {
+  /** Agent tab the user last selected, by its stable key. Null means "whatever is first". */
+  activeAgentTab: string | null;
+  /**
+   * Sessions whose subagents are open, by session id. Everything else draws collapsed.
+   *
+   * Opt-in rather than opt-out: the graph's first job is "what is running on this machine",
+   * which is a question about sessions, and a machine with a few hundred finished subagents
+   * answers it with a wall of boxes unless the subagents stay folded until asked for.
+   */
+  expandedSessions: string[];
+}
+
+const EMPTY_VIEW_STATE: DashboardViewState = { activeAgentTab: null, expandedSessions: [] };
+
+export function generateDashboardHtml(
+  data: ClaudePulseData,
+  resetIntervalMinutes: number,
+  viewState: DashboardViewState = EMPTY_VIEW_STATE
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -115,6 +163,25 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       --warning: var(--vscode-editorWarning-foreground, #ff9800);
       --error: var(--vscode-editorError-foreground, #f44336);
       --amber: #ffb300;
+      /*
+       * The graph's two node colours. Fixed rather than theme-derived: the whole point of the
+       * picture is that a session and a subagent are different KINDS of thing, and a palette
+       * borrowed from the active theme would make that distinction the first casualty of a
+       * theme change. Tints are alpha over the theme's own background, so they stay legible
+       * on light and dark alike.
+       */
+      --node-session-border: #7c6cf0;
+      --node-session-bg: rgba(124, 108, 240, 0.14);
+      --node-agent-border: #2aa88b;
+      --node-agent-bg: rgba(42, 168, 139, 0.12);
+      /*
+       * Connector lines get their own token rather than reusing --border. The panel border
+       * is #2b2b2b against a #1f1f1f editor background in Dark Modern — fine as the edge of
+       * a filled card, invisible as a 1px line in open space, which drew the entire graph
+       * as floating boxes with nothing joining them. The indent guide is the closest thing
+       * VS Code themes expose to "a line you are meant to be able to follow".
+       */
+      --connector: var(--vscode-editorIndentGuide-activeBackground1, #707070);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -361,6 +428,374 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     .section-content.collapsed {
       max-height: 0 !important;
     }
+    /*
+     * Connector lines, drawn with borders on pseudo-elements rather than SVG.
+     *
+     * Every node is a different height and width (a task description is as long as it is), so
+     * an SVG overlay would have to measure the laid-out boxes and redraw on every resize.
+     * Borders on pseudo-elements cost nothing and cannot drift out of alignment with the
+     * boxes they join.
+     *
+     * Children run DOWN the page, not across it, with the spine to their left. A fan-out —
+     * parent centred above a row of children, which is the shape this started as — cannot
+     * survive real data: sessions with 59 and 98 subagents both exist on the machine this was
+     * built on, and even after capping the row at a dozen the parent ends up centred over a
+     * box wider than the panel, scrolled out of sight of the children it points at. Vertical
+     * growth is free, so nothing overflows and the session node is always on screen.
+     */
+    .tree { padding-top: 4px; }
+
+    .tree + .tree {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .tree-children { padding-left: 2px; }
+
+    .tree-branch {
+      position: relative;
+      padding-left: 30px;
+      padding-top: 8px;
+    }
+
+    /*
+     * The spine. It runs the full height of every child except the last, which stops it at
+     * its own elbow — that is what makes the line end at the last sibling instead of
+     * trailing off past the bottom of the group.
+     */
+    .tree-branch::before {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 0;
+      bottom: 0;
+      border-left: 1px solid var(--connector);
+    }
+
+    .tree-branch:last-child::before {
+      bottom: auto;
+      height: 22px;
+    }
+
+    /* The elbow into the node, level with the node's title line. */
+    .tree-branch::after {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 22px;
+      width: 13px;
+      border-top: 1px solid var(--connector);
+    }
+
+    .tree-branch > .tree-root::before {
+      content: '';
+      position: absolute;
+      left: -7px;
+      top: 18px;
+      border: 4px solid transparent;
+      border-left-color: var(--connector);
+    }
+
+    .tree-root { position: relative; }
+
+    .node {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--card-bg);
+      padding: 8px 10px;
+      min-width: 190px;
+      max-width: 560px;
+      text-align: left;
+    }
+
+    .node-session {
+      border-color: var(--node-session-border);
+      background: var(--node-session-bg);
+      min-width: 250px;
+      max-width: 620px;
+    }
+
+    .node-agent {
+      border-color: var(--node-agent-border);
+      background: var(--node-agent-bg);
+    }
+
+    .node-dead { opacity: 0.55; }
+
+    .node-more {
+      border-style: dashed;
+      min-width: 150px;
+      color: var(--muted);
+    }
+    .node-primary { box-shadow: 0 0 0 2px var(--node-session-bg); }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .node-title {
+      font-weight: 600;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-tag {
+      font-size: 0.7em;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+
+    .node-meta,
+    .node-foot,
+    .node-model,
+    .node-path {
+      font-size: 0.82em;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .node-path,
+    .node-title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dot-sep {
+      margin: 0 5px;
+      opacity: 0.6;
+      font-style: normal;
+    }
+
+    .node-status {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex: none;
+      background: var(--muted);
+    }
+
+    .node-running { border-color: var(--success); }
+    .node-running .node-status {
+      background: var(--success);
+      animation: node-pulse 1.6s ease-in-out infinite;
+    }
+    .node-completed .node-status { background: var(--muted); }
+    .node-stopped .node-status { background: var(--warning); }
+    .node-orphaned .node-status { background: var(--error); }
+
+    @keyframes node-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .node-running .node-status { animation: none; }
+    }
+
+    .node-btn {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-size: 0.78em;
+      font-family: inherit;
+      cursor: pointer;
+      flex: none;
+    }
+
+    .node-btn:hover { color: var(--fg); border-color: var(--fg); }
+    .node-btn-danger:hover { color: var(--error); border-color: var(--error); }
+    .node-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 10px 0 14px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+
+    .tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 6px 6px 0 0;
+      padding: 5px 11px;
+      font-size: 0.9em;
+      font-family: inherit;
+      cursor: pointer;
+      /* Sits on the container's bottom border so the active tab can erase its own slice. */
+      margin-bottom: -1px;
+    }
+
+    .tab:hover { color: var(--fg); }
+
+    .tab-active {
+      color: var(--fg);
+      border-color: var(--border);
+      background: var(--card-bg);
+      font-weight: 600;
+    }
+
+    .tab-count {
+      font-size: 0.8em;
+      color: var(--muted);
+      background: var(--node-session-bg);
+      border-radius: 8px;
+      padding: 0 6px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tab-live {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      flex: none;
+      animation: node-pulse 1.6s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tab-live { animation: none; }
+    }
+
+    .tab-panel.is-hidden { display: none; }
+
+    .graph-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 10px 0 2px;
+    }
+
+    .graph-controls-hint {
+      font-size: 0.82em;
+      color: var(--muted);
+      flex: 1;
+    }
+
+    /* Folded: the children are still in the DOM, so opening one is instant and needs no
+       round trip to the extension host. */
+    .tree.is-collapsed > .tree-children { display: none; }
+
+    .node-expandable { cursor: pointer; }
+
+    .node-expandable:hover {
+      border-color: var(--fg);
+    }
+
+    .node-caret {
+      flex: none;
+      width: 16px;
+      height: 16px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 0.85em;
+      line-height: 1;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+
+    .tree.is-collapsed .node-caret { transform: rotate(-90deg); }
+
+    .node-caret:hover { color: var(--fg); }
+    .node-caret-empty { visibility: hidden; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .node-caret { transition: none; }
+    }
+
+    .node-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+
+    .node-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.78em;
+      color: var(--muted);
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1px 7px;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .node-chip-count {
+      font-style: normal;
+      font-variant-numeric: tabular-nums;
+      color: var(--fg);
+      opacity: 0.8;
+    }
+
+    .node-chip-more { border-style: dashed; }
+
+    .panel-summary {
+      font-size: 0.85em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    .panel-running { color: var(--success); }
+
+    .graph-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 0.82em;
+      color: var(--muted);
+      margin: 8px 0 2px;
+    }
+
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-right: 6px;
+      vertical-align: -1px;
+      border: 1px solid var(--border);
+    }
+
+    .swatch-session {
+      background: var(--node-session-bg);
+      border-color: var(--node-session-border);
+    }
+
+    .swatch-agent {
+      background: var(--node-agent-bg);
+      border-color: var(--node-agent-border);
+    }
   </style>
 </head>
 <body>
@@ -375,6 +810,125 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
     function refreshData() {
       vscode.postMessage({ command: 'refreshData' });
     }
+    /*
+     * One delegated listener for every kill button in the graph.
+     *
+     * The buttons carry their payload in data-* attributes rather than an onclick, because an
+     * agent description is model-authored text and inlining it into a JS string inside an HTML
+     * attribute would need escaping for both contexts at once. See escapeHtml().
+     *
+     * The button is disabled on click: the panel re-renders on a poll, not on the click, so
+     * without this a slow SIGTERM invites a second press that lands as a second confirmation.
+     */
+    document.addEventListener('click', function (event) {
+      const target = event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const btn = target.closest('button[data-action], button[data-tab]');
+
+      /*
+       * Disclosure, handled before anything else claims the click.
+       *
+       * Checked only when the click did NOT land on a kill/tab button, because the Kill
+       * button sits inside the very node that toggles — without that guard, killing a
+       * session would also fold it, and the confirmation dialog would come back to a
+       * different-looking row than the one the user aimed at.
+       *
+       * Like the tabs, this flips the DOM here and ALSO tells the host, which rewrites this
+       * HTML from scratch on every poll and would otherwise re-fold everything mid-read.
+       */
+      if (!btn) {
+        const bulk = target.closest('button[data-bulk]');
+        if (bulk) {
+          const card = bulk.closest('.card');
+          const panel = card && card.querySelector('.tab-panel:not(.is-hidden)');
+          if (!panel) return;
+          const open = bulk.dataset.bulk === 'expand';
+          const ids = [];
+          panel.querySelectorAll('[data-session-tree]').forEach(function (tree) {
+            setTreeOpen(tree, open);
+            ids.push(tree.dataset.sessionTree);
+          });
+          if (ids.length) {
+            vscode.postMessage({ command: 'setSessionExpanded', sessionIds: ids, expanded: open });
+          }
+          return;
+        }
+
+        const tree = target.closest('[data-session-tree]');
+        if (tree) {
+          // A click that ended a drag over the cwd path is someone copying it, not asking
+          // for the node to fold under their cursor.
+          const selection = window.getSelection();
+          if (selection && selection.toString().length > 0) return;
+
+          const open = tree.classList.contains('is-collapsed');
+          setTreeOpen(tree, open);
+          vscode.postMessage({
+            command: 'setSessionExpanded',
+            sessionIds: [tree.dataset.sessionTree],
+            expanded: open,
+          });
+          return;
+        }
+      }
+
+      if (!btn || btn.disabled) return;
+
+      /*
+       * Tabs switch here and now, and the choice is ALSO posted to the host.
+       *
+       * Locally because a round trip would mean waiting on a full HTML regeneration to see a
+       * tab change; to the host because that regeneration happens anyway on the next poll and
+       * would otherwise snap the user back to the first tab every few seconds.
+       */
+      if (btn.dataset.tab) {
+        const group = btn.closest('.card');
+        if (!group) return;
+        group.querySelectorAll('.tab').forEach(function (tab) {
+          tab.classList.toggle('tab-active', tab === btn);
+        });
+        group.querySelectorAll('.tab-panel').forEach(function (panel) {
+          panel.classList.toggle('is-hidden', panel.id !== 'panel-' + btn.dataset.tab);
+        });
+        vscode.postMessage({ command: 'selectAgentTab', key: btn.dataset.tabKey || '' });
+        return;
+      }
+
+      const payload = {
+        pid: Number(btn.dataset.pid),
+        sessionId: btn.dataset.session || '',
+        label: btn.dataset.label || '',
+      };
+
+      if (btn.dataset.action === 'kill-session') {
+        vscode.postMessage(Object.assign({ command: 'killSession' }, payload));
+      } else if (btn.dataset.action === 'kill-agent') {
+        vscode.postMessage(
+          Object.assign({ command: 'killAgent', agentDescription: btn.dataset.agent || '' }, payload)
+        );
+      } else {
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '...';
+    });
+
+    /* One session's fold state, in the DOM. The caret's label follows it so a screen reader
+     * is told what the button will do next, not what it just did. */
+    function setTreeOpen(tree, open) {
+      tree.classList.toggle('is-collapsed', !open);
+      const caret = tree.querySelector('.node-caret');
+      if (caret && caret.tagName === 'BUTTON') {
+        caret.setAttribute('aria-expanded', String(open));
+        const label = caret.getAttribute('aria-label') || '';
+        caret.setAttribute(
+          'aria-label',
+          (open ? 'Hide' : 'Show') + label.replace(/^(Show|Hide)/, '')
+        );
+      }
+    }
+
     function toggleSection(name) {
       const content = document.getElementById('content-' + name);
       const toggle = document.getElementById('toggle-' + name);
@@ -432,6 +986,8 @@ export function generateDashboardHtml(data: ClaudePulseData, resetIntervalMinute
       </div>
     </div>
   </div>
+
+  ${renderAgentGraphSection(data.agentGraph, viewState)}
 
   ${renderAgentsSection(data.agents)}
 
@@ -912,6 +1468,486 @@ function renderPromptCacheCard(cache: PromptCacheInfo | null): string {
     </div>
     <div class="usage-bar-info">Estimated from the last request, not reported by Claude Code.</div>
   </div>`;
+}
+
+/**
+ * The spawn graph: every session on the machine, with the subagents hanging off it.
+ *
+ * Laid out top-down — session above, its agents in a row beneath, elbow connectors between —
+ * because the point of the picture is the direction of the arrow. An agent belongs to exactly
+ * one session and cannot outlive it, and that is the fact the layout has to make obvious,
+ * since it is also the reason the kill buttons work the way they do.
+ *
+ * The children row does NOT wrap. A session with 95 subagents (which exists in the wild)
+ * would turn a wrapping row into a block of boxes with connector lines running through the
+ * middle of it; scrolling one row sideways stays readable at any count.
+ */
+function renderAgentGraphSection(graph: AgentGraph | null, viewState: DashboardViewState): string {
+  if (!graph || graph.sessions.length === 0) return '';
+
+  const activeTab = viewState.activeAgentTab;
+  const expanded = new Set(viewState.expandedSessions);
+
+  const live = graph.sessions.filter((s) => s.isAlive).length;
+  const running = graph.sessions.reduce((sum, s) => sum + countByStatus(s.agents, 'running'), 0);
+  const totalAgents = graph.sessions.reduce((sum, s) => sum + s.agentCount, 0);
+
+  const groups = groupAgentsByType(graph);
+
+  // The session tab comes first and is not an agent type. It is what keeps a session with no
+  // subagents reachable at all — it belongs to no type, and on a normal machine most sessions
+  // are in exactly that state — so without it the Kill button for an idle session would have
+  // nowhere to live.
+  const tabs: RenderedTab[] = [
+    {
+      key: SESSIONS_TAB_KEY,
+      label: 'Sessions',
+      count: graph.sessions.length,
+      active: live,
+      activeLabel: `${live} live`,
+      body: graph.sessions.map((session) => renderSessionTree(session, expanded)).join(''),
+    },
+    ...groups.map((group) => ({
+      key: group.agentType,
+      label: group.agentType,
+      count: group.count,
+      active: group.runningCount,
+      activeLabel: `${group.runningCount} running`,
+      body: renderTypePanel(group, expanded),
+    })),
+  ];
+
+  // An unknown or stale key (a type whose last run aged out of the graph) falls back to the
+  // first tab rather than rendering a panel-less tab bar.
+  const selected = tabs.some((t) => t.key === activeTab) ? activeTab : tabs[0].key;
+
+  const tabBar = tabs
+    .map((tab, index) => {
+      const isActive = tab.key === selected;
+      const dot =
+        tab.active > 0 ? `<i class="tab-live" title="${escapeHtml(tab.activeLabel)}"></i>` : '';
+      return `<button class="tab${isActive ? ' tab-active' : ''}"
+        data-tab="t${index}"
+        data-tab-key="${escapeHtml(tab.key)}">${escapeHtml(tab.label)}${dot}<span class="tab-count">${tab.count}</span></button>`;
+    })
+    .join('');
+
+  const panels = tabs
+    .map(
+      (tab, index) =>
+        `<div class="tab-panel${tab.key === selected ? '' : ' is-hidden'}" id="panel-t${index}">${tab.body}</div>`
+    )
+    .join('');
+
+  const truncated = graph.truncated
+    ? `<div class="usage-bar-info">Showing the ${graph.sessions.length} most recent sessions only.</div>`
+    : '';
+
+  return `<div class="section">
+    <div class="section-header" onclick="toggleSection('graph')">
+      <span class="section-toggle" id="toggle-graph">&#9660;</span>
+      <h2>Agent Graph</h2>
+    </div>
+    <div class="section-content" id="content-graph">
+      <div class="grid">
+        <div class="card full-width">
+          <h2>Agents &amp; Sessions</h2>
+          <span class="stat-highlight">${live} live &middot; ${running} agents running</span>
+          <div class="stat-row">
+            <span class="stat-label">Sessions</span>
+            <span class="stat-value">${graph.sessions.length}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Subagents</span>
+            <span class="stat-value">${totalAgents}</span>
+          </div>
+          <div class="graph-legend">
+            <span><i class="swatch swatch-session"></i>Session &mdash; one OS process, killable</span>
+            <span><i class="swatch swatch-agent"></i>Subagent &mdash; runs inside its session</span>
+          </div>
+          <div class="tabs" role="tablist">${tabBar}</div>
+          <div class="graph-controls">
+            <span class="graph-controls-hint">Click a session to show its subagents</span>
+            <button class="node-btn" data-bulk="expand">Expand all</button>
+            <button class="node-btn" data-bulk="collapse">Collapse all</button>
+          </div>
+          ${panels}
+          ${truncated}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** One tab, already rendered. `key` is what the host remembers across a re-render. */
+interface RenderedTab {
+  key: string;
+  label: string;
+  count: number;
+  /** Drives the pulsing dot. Zero means no dot. */
+  active: number;
+  /** What the dot means on THIS tab — live sessions on one, running agents on the rest. */
+  activeLabel: string;
+  body: string;
+}
+
+/**
+ * One agent type: the sessions that ran it, each with its runs of that type beneath it.
+ *
+ * The arrow still points from the session to the agent, because that is still the direction
+ * the process relationship runs — this tab only changes which of the two you started from.
+ * The Kill button therefore stays on the session node here too, and means the same thing.
+ */
+function renderTypePanel(group: AgentTypeGroup, expanded: ReadonlySet<string>): string {
+  const summary = `<div class="panel-summary">
+    <span>${group.count} run${group.count === 1 ? '' : 's'}</span>
+    <i class="dot-sep">&middot;</i>
+    <span>${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'}</span>
+    <i class="dot-sep">&middot;</i>
+    <span>${formatNumber(group.totalTokens)} tokens</span>
+    ${group.runningCount > 0 ? `<i class="dot-sep">&middot;</i><span class="panel-running">${group.runningCount} running</span>` : ''}
+  </div>`;
+
+  const trees = group.sessions
+    .map((entry) => {
+      const { visible, hidden } = selectVisible(
+        entry.instances,
+        (instance) => instance.agent.status === 'running'
+      );
+
+      const branches = visible
+        .map(
+          (instance) => `<div class="tree-branch">
+            <div class="tree-root">${renderAgentNode(instance.agent, entry.session, instance.parentDescription)}</div>
+          </div>`
+        )
+        .join('');
+
+      const summarised = renderHiddenSummary(
+        hidden.map((instance) => instance.agent),
+        hidden.reduce((sum, instance) => sum + instance.agent.tokens, 0)
+      );
+
+      const footer = `${entry.instances.length} run${entry.instances.length === 1 ? '' : 's'} of this type &middot; ${formatNumber(entry.totalTokens)} tokens`;
+      const isOpen = expanded.has(entry.session.sessionId);
+
+      return `<div class="tree${isOpen ? '' : ' is-collapsed'}" data-session-tree="${escapeHtml(entry.session.sessionId)}">
+        <div class="tree-root">${renderSessionNode(entry.session, footer, { expandable: true, expanded: isOpen })}</div>
+        <div class="tree-children">${branches}${summarised}</div>
+      </div>`;
+    })
+    .join('');
+
+  return summary + trees;
+}
+
+/**
+ * One session and its agent tree, folded shut until the user opens it.
+ *
+ * A session with no subagents is not a disclosure at all: it gets no caret, no pointer
+ * cursor and no toggle attribute, because a control that opens an empty drawer teaches the
+ * user that the caret means nothing.
+ */
+function renderSessionTree(session: SessionNode, expanded: ReadonlySet<string>): string {
+  const running = countByStatus(session.agents, 'running');
+  const totals = session.agentCount
+    ? [
+        `${session.agentCount} agent${session.agentCount === 1 ? '' : 's'}`,
+        running > 0 ? `<span class="panel-running">${running} running</span>` : null,
+        `${formatNumber(session.totalTokens)} tokens`,
+      ]
+        .filter((part): part is string => Boolean(part))
+        .join(' &middot; ')
+    : 'no subagents';
+
+  if (session.agents.length === 0) {
+    return `<div class="tree">
+      <div class="tree-root">${renderSessionNode(session, totals, { expandable: false, expanded: false })}</div>
+    </div>`;
+  }
+
+  const isOpen = expanded.has(session.sessionId);
+  const branches = renderBranches(session.agents, session);
+
+  const truncated = session.truncated
+    ? `<div class="usage-bar-info">This session's agent list was truncated.</div>`
+    : '';
+
+  return `<div class="tree${isOpen ? '' : ' is-collapsed'}" data-session-tree="${escapeHtml(session.sessionId)}">
+    <div class="tree-root">${renderSessionNode(session, totals, { expandable: true, expanded: isOpen, agents: session.agents })}</div>
+    <div class="tree-children">${branches}
+    ${truncated}</div>
+  </div>`;
+}
+
+/**
+ * What is inside a folded session, without opening it.
+ *
+ * Counts by agent type rather than listing descriptions: the descriptions are the reason the
+ * expanded view is long, and "4 general-purpose, 1 Explore" is what someone scanning nine
+ * sessions for the interesting one actually reads.
+ */
+export function summariseAgentTypes(agents: AgentNode[]): Array<{ type: string; count: number }> {
+  const counts = new Map<string, number>();
+
+  const walk = (nodes: AgentNode[]): void => {
+    for (const node of nodes) {
+      counts.set(node.agentType, (counts.get(node.agentType) ?? 0) + 1);
+      walk(node.children);
+    }
+  };
+  walk(agents);
+
+  return [...counts.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+}
+
+function renderTypeChips(agents: AgentNode[]): string {
+  const summary = summariseAgentTypes(agents);
+  if (summary.length === 0) return '';
+
+  const shown = summary.slice(0, AGENT_GRAPH_CHIP_TYPES);
+  const rest = summary.slice(AGENT_GRAPH_CHIP_TYPES);
+  const chips = shown
+    .map(
+      (entry) =>
+        `<span class="node-chip">${escapeHtml(entry.type)}<i class="node-chip-count">${entry.count}</i></span>`
+    )
+    .join('');
+  const more = rest.length
+    ? `<span class="node-chip node-chip-more">+${rest.length} type${rest.length === 1 ? '' : 's'}</span>`
+    : '';
+
+  return `<div class="node-chips">${chips}${more}</div>`;
+}
+
+/**
+ * The session box, shared by both tabs.
+ *
+ * Deliberately one function: the Kill button is the most consequential control in the
+ * dashboard, and two copies of it — one per tab — would be two places for its PID/session-id
+ * pairing to drift apart. `footer` is the only thing that differs, because the session tab
+ * counts all of a session's agents while a type tab counts only that type's.
+ */
+interface SessionNodeOptions {
+  /** False for a session with no subagents — nothing to disclose, so no caret. */
+  expandable: boolean;
+  expanded: boolean;
+  /** Only passed where a type breakdown makes sense: the all-agents session tree. */
+  agents?: AgentNode[];
+}
+
+function renderSessionNode(
+  session: SessionNode,
+  footer: string,
+  options: SessionNodeOptions
+): string {
+  const uptime = session.startedAt > 0 ? formatDurationShort(Date.now() - session.startedAt) : '—';
+  const model = session.model ? formatModelName(session.model) : null;
+
+  const meta = [
+    `PID ${session.pid}`,
+    session.isAlive ? `up ${uptime}` : 'exited',
+    session.entrypoint,
+    model,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => `<span>${escapeHtml(part)}</span>`)
+    .join('<i class="dot-sep">&middot;</i>');
+
+  // A dead session has nothing to signal, so it gets no button rather than a disabled one.
+  const kill = session.isAlive
+    ? `<button class="node-btn node-btn-danger" title="Send SIGTERM to PID ${session.pid}"
+         data-action="kill-session"
+         data-pid="${session.pid}"
+         data-session="${escapeHtml(session.sessionId)}"
+         data-label="${escapeHtml(session.label)}">Kill</button>`
+    : '';
+
+  // The caret is a real button so the disclosure is reachable by keyboard and announced as
+  // one; the surrounding node is click-to-toggle as well, which is what a pointer expects of
+  // a row this size. Both routes end in the same handler.
+  const caret = options.expandable
+    ? `<button class="node-caret" aria-expanded="${options.expanded}"
+         aria-label="${options.expanded ? 'Hide' : 'Show'} subagents of ${escapeHtml(session.label)}">&#9662;</button>`
+    : '<span class="node-caret node-caret-empty" aria-hidden="true"></span>';
+
+  const chips = options.expandable && options.agents ? renderTypeChips(options.agents) : '';
+
+  return `<div class="node node-session${session.isAlive ? '' : ' node-dead'}${session.isPrimary ? ' node-primary' : ''}${options.expandable ? ' node-expandable' : ''}">
+    <div class="node-head">
+      ${caret}
+      <span class="node-title">${escapeHtml(session.label)}</span>
+      ${session.isPrimary ? '<span class="node-tag">this window</span>' : ''}
+      ${kill}
+    </div>
+    <div class="node-meta">${meta}</div>
+    <div class="node-path" title="${escapeHtml(session.cwd)}">${escapeHtml(session.cwd || '—')}</div>
+    <div class="node-foot">${footer}</div>
+    ${chips}
+  </div>`;
+}
+
+/** The agent row beneath a node, recursing for agents that spawned agents of their own. */
+function renderBranches(agents: AgentNode[], session: SessionNode): string {
+  const { visible, hidden } = selectVisible(agents, (a) => a.status === 'running');
+
+  const branches = visible
+    .map((agent) => {
+      const nested = agent.children.length
+        ? `<div class="tree-children">${renderBranches(agent.children, session)}</div>`
+        : '';
+
+      return `<div class="tree-branch">
+        <div class="tree-root">${renderAgentNode(agent, session)}</div>
+        ${nested}
+      </div>`;
+    })
+    .join('');
+
+  return (
+    branches +
+    renderHiddenSummary(
+      hidden,
+      hidden.reduce((sum, agent) => sum + agent.subtreeTokens, 0)
+    )
+  );
+}
+
+/**
+ * Splits a group into the agents that get a box and the ones that get counted.
+ *
+ * Running agents come first and are never summarised away — a Stop button the user has to
+ * scroll past eleven finished agents to reach is not a Stop button. The remaining slots go
+ * to the costliest of the rest, which is what someone auditing spend came here to see.
+ *
+ * Generic over the item because both views need the identical rule applied to different
+ * shapes: the session tree caps AgentNodes, the type tab caps AgentTypeInstances. Two copies
+ * of a "which runs are worth drawing" policy is one copy too many.
+ */
+function selectVisible<T>(
+  items: T[],
+  isRunning: (item: T) => boolean
+): { visible: T[]; hidden: T[] } {
+  if (items.length <= AGENT_GRAPH_NODES_PER_LEVEL) return { visible: items, hidden: [] };
+
+  const running = items.filter(isRunning);
+  const rest = items.filter((item) => !isRunning(item));
+
+  const visible = running.slice(0, AGENT_GRAPH_MAX_NODES_PER_LEVEL);
+  // Running agents can push the group past the baseline, but never past the ceiling.
+  const slots = Math.min(
+    AGENT_GRAPH_MAX_NODES_PER_LEVEL,
+    Math.max(AGENT_GRAPH_NODES_PER_LEVEL, visible.length)
+  );
+  for (const item of rest) {
+    if (visible.length >= slots) break;
+    visible.push(item);
+  }
+
+  const shown = new Set(visible);
+  return { visible, hidden: items.filter((item) => !shown.has(item)) };
+}
+
+/**
+ * A dashed node standing in for the agents a group did not draw.
+ *
+ * It carries their count and their combined cost rather than just an ellipsis: the totals on
+ * the session node include them, so a group that simply stopped would leave the arithmetic
+ * looking wrong. The Agents table below still lists every agent of the current session.
+ *
+ * `tokens` is the caller's to compute, because "what did the hidden ones cost" has two
+ * different answers. In the session tree a hidden agent takes its whole subtree off screen
+ * with it, so the subtree total is the honest number. In a type tab the list is flattened and
+ * those children are separate entries of their own, so the same sum would count them twice.
+ */
+function renderHiddenSummary(hidden: AgentNode[], tokens: number): string {
+  if (hidden.length === 0) return '';
+  const running = hidden.filter((a) => a.status === 'running').length;
+  const note = running > 0 ? `${running} still running` : 'none still running';
+
+  return `<div class="tree-branch">
+    <div class="tree-root">
+      <div class="node node-more">
+        <div class="node-head">
+          <span class="node-title">+${hidden.length} more agent${hidden.length === 1 ? '' : 's'}</span>
+        </div>
+        <div class="node-meta">${escapeHtml(note)}</div>
+        <div class="node-foot">${formatNumber(tokens)} tokens</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAgentNode(
+  agent: AgentNode,
+  session: SessionNode,
+  parentDescription: string | null = null
+): string {
+  const meta = [
+    agent.agentType,
+    `${agent.turns} turn${agent.turns === 1 ? '' : 's'}`,
+    agent.durationMs === null ? null : formatDurationShort(agent.durationMs),
+  ]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => `<span>${escapeHtml(part)}</span>`)
+    .join('<i class="dot-sep">&middot;</i>');
+
+  const tokens =
+    agent.subtreeTokens > agent.tokens
+      ? `${formatNumber(agent.tokens)} tokens &middot; ${formatNumber(agent.subtreeTokens)} with children`
+      : `${formatNumber(agent.tokens)} tokens`;
+
+  // Offered only for an agent that is actually still going. Stopping one means stopping its
+  // session, which the confirmation in extension.ts spells out — never this button.
+  const stop =
+    agent.status === 'running' && session.isAlive
+      ? `<button class="node-btn node-btn-danger" title="Stopping a subagent means terminating its session"
+           data-action="kill-agent"
+           data-pid="${session.pid}"
+           data-session="${escapeHtml(session.sessionId)}"
+           data-agent="${escapeHtml(agent.description)}"
+           data-label="${escapeHtml(session.label)}">Stop</button>`
+      : '';
+
+  // Only set in a type tab, where the nesting that would otherwise show this is flattened
+  // away — and where the parent may be an agent of a different type under a different tab.
+  const spawnedBy = parentDescription
+    ? `<div class="node-model">spawned by ${escapeHtml(parentDescription)}</div>`
+    : '';
+
+  return `<div class="node node-agent node-${agent.status}">
+    <div class="node-head">
+      <span class="node-status" title="${escapeHtml(statusTitle(agent.status))}"></span>
+      <span class="node-title">${escapeHtml(agent.description)}</span>
+      ${stop}
+    </div>
+    <div class="node-meta">${meta}</div>
+    <div class="node-foot">${tokens}</div>
+    <div class="node-model">${escapeHtml(formatModelName(agent.model) || 'model unknown')}</div>
+    ${spawnedBy}
+  </div>`;
+}
+
+function countByStatus(agents: AgentNode[], status: AgentStatus): number {
+  return agents.reduce(
+    (sum, agent) => sum + (agent.status === status ? 1 : 0) + countByStatus(agent.children, status),
+    0
+  );
+}
+
+function statusTitle(status: AgentStatus): string {
+  switch (status) {
+    case 'running':
+      return 'Running — no completion record yet and its session is alive';
+    case 'completed':
+      return 'Completed — returned its result';
+    case 'stopped':
+      return 'Stopped by the user';
+    case 'orphaned':
+      return 'Never finished — nothing is advancing it any more';
+  }
 }
 
 /**

@@ -135,3 +135,68 @@ export const AGENT_META_SUFFIX = '.meta.json';
 export const AGENT_SCAN_CACHE_TTL_MS = 15_000;
 /** Hard bound on agents read per scan, so a pathological session cannot stall the extension. */
 export const AGENT_SCAN_MAX_AGENTS = 500;
+
+// Agent Graph
+/**
+ * Bounds how often the whole-machine graph is rebuilt.
+ *
+ * Longer than AGENT_SCAN_CACHE_TTL_MS because the graph re-lists a directory per session
+ * rather than per scan, and nothing in it moves fast enough to be worth the syscalls: an
+ * agent appearing or finishing is visible within one poll either way.
+ */
+export const AGENT_GRAPH_CACHE_TTL_MS = 20_000;
+/**
+ * Hard bound on sessions walked per graph scan, newest first.
+ *
+ * Sessions are bounded in practice by `<claudeHome>/sessions/`, which Claude Code prunes —
+ * 12 files on a busy machine. This exists so a directory that never got pruned degrades the
+ * view rather than the editor.
+ */
+export const AGENT_GRAPH_MAX_SESSIONS = 24;
+/**
+ * A live session's agent with no terminal stop_reason is only called 'running' if its
+ * transcript was touched inside this window.
+ *
+ * Needed because an abandoned agent — its session interrupted mid-turn, or crashed — writes
+ * no completion record and would otherwise read as running forever. Generous on purpose: a
+ * subagent can sit on one long tool call for minutes without writing a line.
+ */
+export const AGENT_RUNNING_STALE_MS = 10 * 60 * 1000;
+/** Terminal stop_reason values: the agent finished its turn and returned. */
+export const AGENT_TERMINAL_STOP_REASONS = new Set(['end_turn', 'stop_sequence', 'max_tokens']);
+
+// Process Control
+/**
+ * How long a session gets to exit on SIGTERM before the UI offers SIGKILL.
+ *
+ * Claude Code flushes its transcript and removes its session file on SIGTERM, so the polite
+ * signal is always tried first — a SIGKILL leaves the session file behind and the extension
+ * then shows a session that no longer exists until the file is reaped.
+ */
+export const KILL_GRACE_PERIOD_MS = 4_000;
+/** Poll interval while waiting out the grace period. */
+export const KILL_POLL_INTERVAL_MS = 250;
+
+/**
+ * Baseline agents drawn per level of the graph before the rest are summarised.
+ *
+ * Measured need, not a guess: sessions with 59 and 98 subagents both exist on the machine
+ * this was built on, and the children row deliberately does not wrap — so without a cap one
+ * session renders a row some 19,000px wide. Twelve fills a normal editor width.
+ */
+export const AGENT_GRAPH_NODES_PER_LEVEL = 12;
+/**
+ * Ceiling per level, which only a level with many RUNNING agents can reach.
+ *
+ * Running agents are never summarised away: they are the only ones there is anything to do
+ * about, and hiding one behind twelve finished ones would defeat the point of the view.
+ * This bounds that exception so a fan-out of 98 live agents still cannot flood the DOM.
+ */
+export const AGENT_GRAPH_MAX_NODES_PER_LEVEL = 40;
+/**
+ * Agent types named on a folded session before the rest become "+N types".
+ *
+ * The chips exist so a collapsed session still says what is inside it; past three they stop
+ * summarising and start being the list they were meant to replace.
+ */
+export const AGENT_GRAPH_CHIP_TYPES = 3;
