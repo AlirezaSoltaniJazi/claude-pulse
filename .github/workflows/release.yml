@@ -7,6 +7,15 @@ name: Release
 #   2. Run it manually (Actions → Release → Run workflow) and choose the bump
 #      (or `current` to release the current version without bumping).
 # In both cases the GitHub Release notes come from the promoted CHANGELOG section.
+#
+# A third manual option, `marketplace-only`, recovers a release that reached
+# GitHub but not the Marketplace: it publishes the .vsix already attached to the
+# GitHub Release for the current version, and touches nothing else — no bump,
+# no commit, no tag.
+#
+# Publishing needs the repository secret VSCE_PAT: an Azure DevOps Personal
+# Access Token with Organization "All accessible organizations" and scope
+# Marketplace → Manage. It is checked before anything is tagged or pushed.
 on:
   workflow_dispatch:
     inputs:
@@ -20,6 +29,7 @@ on:
           - patch
           - minor
           - major
+          - marketplace-only
   pull_request:
     types: [closed]
     branches: [main]
@@ -81,16 +91,46 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             BUMP="$DISPATCH_BUMP"
           elif echo "$PR_LABELS" | grep -q 'release:major'; then
-            BUMP=major
+            BUMP="major"
           elif echo "$PR_LABELS" | grep -q 'release:minor'; then
-            BUMP=minor
+            BUMP="minor"
           else
-            BUMP=patch
+            BUMP="patch"
+          fi
+          # marketplace-only republishes what is already released, so it never bumps.
+          if [ "$BUMP" = "marketplace-only" ]; then
+            echo "mode=marketplace-only" >> "$GITHUB_OUTPUT"
+            BUMP="current"
+          else
+            echo "mode=release" >> "$GITHUB_OUTPUT"
           fi
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
           echo "Resolved bump: $BUMP"
 
       - run: npm ci
+
+      # Fails the run before anything is bumped, tagged or pushed. Without this the
+      # Marketplace step was the LAST one, so a missing or expired token left a
+      # half-finished release behind: tag pushed, GitHub Release created, nothing on
+      # the Marketplace — which is what happened to v0.2.7, v1.0.0 and v1.1.0.
+      - name: Verify Marketplace token
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          set -euo pipefail
+          # Checked explicitly because vsce does not fail on an empty token: it
+          # falls back to a locally stored credential, which a runner never has,
+          # and the server then reports an anonymous user (TF400813) instead.
+          if [ -z "${VSCE_PAT}" ]; then
+            echo "::error::Repository secret VSCE_PAT is not set. Create an Azure DevOps PAT (Organization: All accessible organizations; Scope: Marketplace > Manage) and add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          publisher=$(node -p "require('./package.json').publisher")
+          if ! npx @vscode/vsce verify-pat "$publisher"; then
+            echo "::error::VSCE_PAT is set but cannot publish as '$publisher'. It is probably expired, or was created without 'All accessible organizations' or the Marketplace > Manage scope."
+            exit 1
+          fi
+
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
@@ -109,10 +149,24 @@ jobs:
       # step there is no .vsix in the working directory to attach to the release —
       # which is why every release before this one shipped with no asset.
       - name: Package extension
+        if: steps.params.outputs.mode == 'release'
         run: npx @vscode/vsce package --no-update-package-json
+
+      # Republishing must ship the exact bytes already on the GitHub Release, not a
+      # rebuild of them, so the two places a user can install from never diverge.
+      - name: Download released package
+        if: steps.params.outputs.mode == 'marketplace-only'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.bump.outputs.version }}"
+          gh release download "v$version" --pattern "claude-pulse-monitor-$version.vsix"
+          ls -l "claude-pulse-monitor-$version.vsix"
 
       - name: Extract release notes from changelog
         id: notes
+        if: steps.params.outputs.mode == 'release'
         run: |
           set -euo pipefail
           VERSION="${{ steps.bump.outputs.version }}"
@@ -131,6 +185,7 @@ jobs:
           fi
 
       - name: Commit, tag and push
+        if: steps.params.outputs.mode == 'release'
         run: |
           set -euo pipefail
           version="${{ steps.bump.outputs.version }}"
@@ -149,7 +204,7 @@ jobs:
           git push origin "v$version"
 
       - name: GitHub Release (notes from changelog)
-        if: steps.notes.outputs.notes_file != ''
+        if: steps.params.outputs.mode == 'release' && steps.notes.outputs.notes_file != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.version }}
@@ -159,7 +214,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: GitHub Release (generated notes fallback)
-        if: steps.notes.outputs.notes_file == ''
+        if: steps.params.outputs.mode == 'release' && steps.notes.outputs.notes_file == ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.bump.outputs.version }}
