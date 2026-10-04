@@ -27,6 +27,9 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 - **Lifetime stats** — Total tokens, favorite model, total sessions and messages, first session date, longest session, active-day streaks, and most active day
 - **Model breakdown** — Token usage table by model (input, output, cache read, cache create)
 - **Hourly activity chart** — Visual bar chart of activity distribution by hour
+- **Agent graph** — A tab per agent type showing the sessions that ran it, plus a **Sessions** tab with each
+  session's full subagent tree. Every run shows its type, model, turns, cost and status (running, completed,
+  stopped, never finished), and every session carries a button to terminate it
 
 ![Dashboard](https://raw.githubusercontent.com/AlirezaSoltaniJazi/claude-pulse/main/media/screenshot-dashboard.png)
 
@@ -78,6 +81,7 @@ All settings are under `claudePulse.*` in VS Code Settings.
 | `statusBar.showCacheWarmth` | boolean | `false` | Show an approximate prompt-cache countdown (e.g. `~59m`) in status bar |
 | `statusBar.showScopedUsage` | boolean | `true` | Show model-specific weekly usage once above 0% (e.g. `Fable 2% 4d 5h`) |
 | `showAgentMap` | boolean | `true` | Show the Agents section listing the subagents this session spawned |
+| `showAgentGraph` | boolean | `true` | Show the Agent Graph section: agent types and sessions as tabs, with session kill buttons |
 | `promptCacheTtlMinutes` | number | `60` | Assumed prompt-cache lifetime in minutes (1–1440) |
 | `sessionResetIntervalMinutes` | number | `300` | Session reset interval in minutes (300 = 5h for Pro plan) |
 | `sessionTokenLimit` | number | `8000000` | Estimated token limit per session window (for usage % calculation) |
@@ -99,6 +103,7 @@ All settings are under `claudePulse.*` in VS Code Settings.
 |---------|-------------|
 | `Claude Pulse: Show Dashboard` | Open the interactive dashboard panel |
 | `Claude Pulse: Refresh Data` | Force refresh all data (files + API) |
+| `Claude Pulse: Terminate a Claude Session` | Pick a running Claude session and terminate it (confirms first) |
 | `Claude Pulse: Reset Session Timer` | Reset the session timer |
 | `Claude Pulse: Toggle Notifications` | Enable or disable notifications |
 
@@ -114,6 +119,9 @@ Claude Pulse reads data from two sources:
 
 - **No telemetry**: Claude Pulse does not collect, store, or transmit any analytics or telemetry data
 - **Local data only**: Stats and session data are read from your local `~/.claude/` directory (read-only)
+- **Process control is opt-in per action**: the one thing Claude Pulse does beyond reading files is terminate a
+  Claude session when you ask it to. Every termination is confirmed in a modal first, only a PID that still
+  matches a known session's id is ever signalled, and `SIGTERM` is always tried before `SIGKILL` is offered
 - **Secure credentials**: OAuth tokens are read from the OS Keychain (macOS) or a local file — never stored by the extension
 - **HTTPS only**: All API communication uses HTTPS
 - **No eval**: The dashboard webview runs only first-party JavaScript — no `eval()` or dynamic code execution
@@ -142,6 +150,11 @@ After setup, you'll receive macOS notification banners for:
 - OAuth credential reading uses the macOS Keychain, with a file-based fallback (`~/.claude/.credentials.json`) on Linux and Windows.
 - The extension reads stats written by Claude Code CLI — if the CLI changes its file format, stats parsing may need updates.
 - Usage API data depends on having a valid OAuth session with Claude Code.
+- A single subagent cannot be stopped from outside Claude Code. Subagents share their session's process, so the
+  graph's Stop button terminates that whole session — and says so before it does.
+- Subagent status is inferred from the transcripts, not reported. A completed agent is proven by the terminal
+  `stop_reason` on its last turn and a user-cancelled one by its own metadata, but an agent that was abandoned
+  mid-work is recognised only once it has gone quiet, so it reads as running until then.
 
 ## Contributing
 

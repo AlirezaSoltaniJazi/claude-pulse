@@ -31,6 +31,10 @@
         "title": "Claude Pulse: Refresh Data"
       },
       {
+        "command": "claudePulse.killSession",
+        "title": "Claude Pulse: Terminate a Claude Session"
+      },
+      {
         "command": "claudePulse.resetTimer",
         "title": "Claude Pulse: Reset Session Timer"
       },
@@ -149,6 +153,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show the Agents section in the dashboard, listing the subagents the current session spawned and what each one cost. Scanning reads subagent transcripts, so it runs only while the dashboard is open."
+        },
+        "claudePulse.showAgentGraph": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Agent Graph section in the dashboard: every Claude session on this machine with the subagents it spawned, and a button to terminate a session. Scans only while the dashboard is open."
         },
         "claudePulse.promptCacheTtlMinutes": {
           "type": "number",
