@@ -2,10 +2,10 @@
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+ installed
+- [Node.js](https://nodejs.org/) 22+ installed (`@vscode/vsce` 4 requires it)
 - `@vscode/vsce` — already a devDependency (`npm install` pulls it in); a global install is only needed if you want to run bare `vsce` commands outside `npm run`/`npx`
 - A VS Code Marketplace Personal Access Token (PAT) — see [Managing Extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension)
-- `VSCE_PAT` secret configured in GitHub repository settings — publishing only happens via CI, there is no local publish path
+- `VSCE_PAT` secret configured in GitHub repository settings (**Settings → Secrets and variables → Actions**) — publishing only happens via CI, there is no local publish path. Create the token in [Azure DevOps](https://dev.azure.com/) → User settings → Personal access tokens, with **Organization: All accessible organizations** and **Scopes: Custom defined → Marketplace → Manage**. A token scoped to a single organization is accepted by Azure DevOps but rejected by the Marketplace.
 
 ## Before You Publish
 
@@ -44,6 +44,10 @@ Dependabot PRs and PRs from forks never trigger a release, even if labelled.
 
 Go to **Actions → Release → Run workflow** and choose a bump (`patch`, `minor`, `major`, or `current` to re-release the existing version without bumping). This runs the same steps as Option A.
 
+### Option C: Marketplace only (recover a half-finished release)
+
+If a version is tagged and on GitHub Releases but never reached the Marketplace, run the workflow with **`marketplace-only`**. It downloads the `.vsix` already attached to the GitHub Release for the current version and publishes exactly that file — no bump, no commit, no tag, no new GitHub Release.
+
 ## Version Bump Types
 
 | Label / dispatch input | When to use | Example |
@@ -73,6 +77,8 @@ This is the same local verification the release workflow runs before it bumps an
 | Problem | Solution |
 |---------|----------|
 | `vsce publish` fails with 409 | Version already exists — re-run the release workflow (it bumps automatically) |
-| `VSCE_PAT` expired | Generate a new PAT in [Azure DevOps](https://dev.azure.com/) and update the GitHub secret |
+| "Repository secret VSCE_PAT is not set" | The secret doesn't exist or is misnamed. Add it as described under Prerequisites, then run **`marketplace-only`** to publish the version that was already tagged |
+| `TF400813: The user 'aaaaaaaa-…' is not authorized` | The token reached the Marketplace empty — same fix as above. The run now stops at **Verify Marketplace token** before tagging, so this should no longer appear |
+| "VSCE_PAT is set but cannot publish" / `VSCE_PAT` expired | Generate a new PAT in [Azure DevOps](https://dev.azure.com/) (All accessible organizations, Marketplace → Manage) and update the GitHub secret |
 | Release workflow didn't trigger | Check the PR was merged (not just closed), carries a `release:*` label, isn't from a fork, and isn't from `dependabot[bot]` |
 | Tests fail during release | Fix tests first — the workflow aborts on any lint/format/typecheck/test failure before bumping anything |
