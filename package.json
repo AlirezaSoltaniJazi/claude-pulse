@@ -216,7 +216,7 @@
     ]
   },
   "dependencies": {
-    "node-notifier": "^10.0.1"
+    "node-notifier": "^11.0.0"
   },
   "overrides": {
     "node-notifier": {
