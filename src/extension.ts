@@ -6,12 +6,14 @@ import {
   getActiveSessions,
   getMostRecentSession,
   findSessionForWorkspace,
+  isProcessAlive,
 } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
 import { readSessionAgents, readAgentGraph, clearAgentCache } from './data/agentReader';
 import { readLoops, clearLoopCache } from './data/loopReader';
+import { buildLoopInstruction, findAncestorPid, findLoop } from './data/loopControl';
 import {
   buildKillConfirmation,
   killSession,
@@ -21,7 +23,7 @@ import {
 import { fetchUsage, clearUsageCache, FetchUsageResult } from './data/usageApi';
 import { FileWatcher } from './data/fileWatcher';
 import { StatusBar } from './ui/statusBar';
-import { DashboardPanel, KillRequest } from './ui/webviewPanel';
+import { DashboardPanel, KillRequest, LoopActionRequest } from './ui/webviewPanel';
 import { SessionMonitor } from './notifications/sessionMonitor';
 import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
@@ -129,6 +131,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   dashboardPanel.onKillRequested((request) => void handleKillRequest(request));
   dashboardPanel.onScanLoops(() => void scanLoops());
+  dashboardPanel.onLoopAction((request) => void handleLoopAction(request));
   dashboardPanel.onRefreshData(async () => {
     clearScanCache();
     clearUsageCache();
@@ -380,6 +383,80 @@ async function scanLoops(): Promise<void> {
   const loops = await readLoops(config.claudeHomePath, sessions);
   cachedData = { ...cachedData, loops };
   updateUI();
+}
+
+/**
+ * Run-now or Cancel on one loop.
+ *
+ * The extension cannot reach a loop directly — it lives in the session's memory — so the
+ * request becomes text typed into that session (see buildLoopInstruction). The text is built
+ * from the extension's own last scan, never from the webview message, and the session is
+ * re-validated by pid AND session id so a stale button cannot type into a recycled PID's
+ * terminal. Confirmed modally first, like a kill: both actions spend a turn of the session.
+ *
+ * When the session is not in one of this window's terminals — the Claude Code panel, or a
+ * terminal app outside VS Code — there is nothing to type into, so the text goes to the
+ * clipboard instead and the user pastes it.
+ */
+async function handleLoopAction(request: LoopActionRequest): Promise<void> {
+  const found = findLoop(cachedData.loops, request.sessionId, request.loopId);
+  const session = resolveKillTarget(request.pid, request.sessionId, cachedData.sessions);
+  if (!found || !session || !isProcessAlive(session.pid) || found.loop.status !== 'active') {
+    vscode.window.showWarningMessage(
+      'Claude Pulse: that loop is no longer active — press Refresh loops to update the list.'
+    );
+    return;
+  }
+
+  const { loop } = found;
+  const text = buildLoopInstruction(request.action, loop);
+  const isRun = request.action === 'run';
+  const confirmLabel = isRun ? 'Run Now' : 'Cancel Loop';
+
+  const choice = await vscode.window.showWarningMessage(
+    isRun
+      ? `Run this loop now in session ${request.label}?`
+      : `Cancel this loop in session ${request.label}?`,
+    {
+      modal: true,
+      detail:
+        `${isRun ? 'This sends the loop prompt to the session as its next turn; the schedule is unchanged.' : 'This asks Claude in that session to cancel the loop as its next turn.'}\n\n` +
+        `Text to send:\n${text}`,
+    },
+    confirmLabel
+  );
+  if (choice !== confirmLabel) return;
+
+  const terminal = await findSessionTerminal(session.pid);
+  if (terminal) {
+    terminal.show(true);
+    terminal.sendText(text, true);
+    vscode.window.showInformationMessage(
+      `Claude Pulse: sent to ${request.label}. Press Refresh loops once Claude has handled it.`
+    );
+    return;
+  }
+
+  await vscode.env.clipboard.writeText(text);
+  vscode.window.showInformationMessage(
+    `Claude Pulse: session ${request.label} is not running in one of this window's terminals, ` +
+      'so the instruction was copied to the clipboard. Paste it into that session.'
+  );
+}
+
+/** This window's terminal whose shell is the session's process or one of its ancestors. */
+async function findSessionTerminal(sessionPid: number): Promise<vscode.Terminal | null> {
+  const byPid = new Map<number, vscode.Terminal>();
+  await Promise.all(
+    vscode.window.terminals.map(async (terminal) => {
+      const pid = await terminal.processId;
+      if (pid) byPid.set(pid, terminal);
+    })
+  );
+  if (byPid.size === 0) return null;
+
+  const match = await findAncestorPid(sessionPid, new Set(byPid.keys()));
+  return match === null ? null : (byPid.get(match) ?? null);
 }
 
 /** Keeps the transcript watch pointed at whatever pickPrimarySession() currently returns. */

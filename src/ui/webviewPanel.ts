@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { ClaudePulseData } from '../types';
+import { LoopAction } from '../data/loopControl';
 import { DashboardViewState, generateDashboardHtml } from './webviewContent';
 
 /**
@@ -17,6 +18,16 @@ export interface KillRequest {
   agentDescription?: string;
 }
 
+/** A Run-now or Cancel click on one loop. The loop itself is looked up by id, never sent. */
+export interface LoopActionRequest {
+  action: LoopAction;
+  pid: number;
+  sessionId: string;
+  loopId: string;
+  /** The session's display label, for the confirmation text. */
+  label: string;
+}
+
 export class DashboardPanel implements vscode.Disposable {
   private panel: vscode.WebviewPanel | null = null;
   private readonly _onResetTimer = new vscode.EventEmitter<void>();
@@ -27,6 +38,8 @@ export class DashboardPanel implements vscode.Disposable {
   readonly onKillRequested = this._onKillRequested.event;
   private readonly _onScanLoops = new vscode.EventEmitter<void>();
   readonly onScanLoops = this._onScanLoops.event;
+  private readonly _onLoopAction = new vscode.EventEmitter<LoopActionRequest>();
+  readonly onLoopAction = this._onLoopAction.event;
 
   /**
    * Which agent tab is open. Panel state, not extension state, and deliberately not fired
@@ -63,6 +76,9 @@ export class DashboardPanel implements vscode.Disposable {
           this._onRefreshData.fire();
         } else if (message.command === 'scanLoops') {
           this._onScanLoops.fire();
+        } else if (message.command === 'loopAction') {
+          const request = parseLoopActionRequest(message);
+          if (request) this._onLoopAction.fire(request);
         } else if (message.command === 'setSessionExpanded') {
           this.viewState = {
             ...this.viewState,
@@ -121,7 +137,32 @@ export class DashboardPanel implements vscode.Disposable {
     this._onRefreshData.dispose();
     this._onKillRequested.dispose();
     this._onScanLoops.dispose();
+    this._onLoopAction.dispose();
   }
+}
+
+/**
+ * Narrows a webview message into a LoopActionRequest, or null. Shape-checked for the same
+ * reason as parseKillRequest(); whether the ids name a real, live loop is decided by the
+ * handler against the last scan.
+ */
+export function parseLoopActionRequest(message: unknown): LoopActionRequest | null {
+  if (typeof message !== 'object' || message === null) return null;
+  const raw = message as Record<string, unknown>;
+
+  if (raw.action !== 'run' && raw.action !== 'cancel') return null;
+  const { pid, sessionId, loopId } = raw;
+  if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 1) return null;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return null;
+  if (typeof loopId !== 'string' || loopId.length === 0) return null;
+
+  return {
+    action: raw.action,
+    pid,
+    sessionId,
+    loopId,
+    label: typeof raw.label === 'string' && raw.label ? raw.label : sessionId.slice(0, 8),
+  };
 }
 
 /**

@@ -217,3 +217,8 @@ export const LOOP_RECURRING_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 export const LOOP_FIRE_GRACE_MS = 10 * 60 * 1000;
 /** Sentinel prompt Claude Code passes for an autonomous `/loop` with no task of its own. */
 export const LOOP_AUTONOMOUS_SENTINEL = '<<autonomous-loop-dynamic>>';
+/**
+ * Parent hops walked from a session's PID looking for the VS Code terminal that owns it.
+ * Claude is normally the shell's direct child; the slack covers wrappers such as `npx` or `env`.
+ */
+export const LOOP_MAX_PROCESS_ANCESTRY = 6;

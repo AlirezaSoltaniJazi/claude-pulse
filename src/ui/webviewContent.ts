@@ -866,6 +866,13 @@ export function generateDashboardHtml(
       white-space: nowrap;
     }
 
+    .loop-actions {
+      display: flex;
+      gap: 4px;
+      justify-content: flex-end;
+      white-space: nowrap;
+    }
+
     .loop-status-active { color: var(--success); border-color: var(--success); }
     .loop-status-cancelled { color: var(--warning); border-color: var(--warning); }
   </style>
@@ -1000,6 +1007,17 @@ export function generateDashboardHtml(
       } else if (btn.dataset.action === 'kill-agent') {
         vscode.postMessage(
           Object.assign({ command: 'killAgent', agentDescription: btn.dataset.agent || '' }, payload)
+        );
+      } else if (btn.dataset.action === 'loop-run' || btn.dataset.action === 'loop-cancel') {
+        vscode.postMessage(
+          Object.assign(
+            {
+              command: 'loopAction',
+              action: btn.dataset.action === 'loop-run' ? 'run' : 'cancel',
+              loopId: btn.dataset.loop || '',
+            },
+            payload
+          )
         );
       } else {
         return;
@@ -2171,7 +2189,7 @@ function renderLoopsSection(loops: LoopScan | null): string {
 
 function renderLoopSession(session: SessionLoops): string {
   const active = session.loops.filter((l) => l.status === 'active').length;
-  const rows = session.loops.map(renderLoopRow).join('');
+  const rows = session.loops.map((loop) => renderLoopRow(loop, session)).join('');
 
   return `<div class="loop-session${session.isAlive ? '' : ' loop-session-dead'}">
     <div class="loop-session-head">
@@ -2190,6 +2208,7 @@ function renderLoopSession(session: SessionLoops): string {
           <th>Last run</th>
           <th>Next run</th>
           <th>Expires</th>
+          <th></th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -2197,7 +2216,7 @@ function renderLoopSession(session: SessionLoops): string {
   </div>`;
 }
 
-function renderLoopRow(loop: LoopInfo): string {
+function renderLoopRow(loop: LoopInfo, session: SessionLoops): string {
   const now = Date.now();
   const prompt =
     loop.prompt === LOOP_AUTONOMOUS_SENTINEL ? 'Autonomous loop (no task prompt)' : loop.prompt;
@@ -2250,7 +2269,29 @@ function renderLoopRow(loop: LoopInfo): string {
     <td>${loop.lastRunAt > 0 ? formatAgo(loop.lastRunAt, now) : '&mdash;'}</td>
     <td>${next}</td>
     <td>${expires}</td>
+    <td>${renderLoopActions(loop, session)}</td>
   </tr>`;
+}
+
+/**
+ * Run-now and Cancel, for a loop there is still something to do about.
+ *
+ * Payload in data-* attributes and dispatched by the one delegated listener, like the kill
+ * buttons, and for the same reason: the label is session-derived text. Only ids travel —
+ * the extension looks the loop up in its own last scan, so the text it types into a session
+ * never comes from the webview.
+ */
+function renderLoopActions(loop: LoopInfo, session: SessionLoops): string {
+  if (loop.status !== 'active' || !session.isAlive) return '';
+
+  const data = `data-session="${escapeHtml(session.sessionId)}" data-pid="${escapeHtml(
+    String(session.pid)
+  )}" data-label="${escapeHtml(session.label)}" data-loop="${escapeHtml(loop.id)}"`;
+
+  return `<div class="loop-actions">
+      <button class="node-btn" data-action="loop-run" ${data} title="Run this loop's prompt now, ahead of its schedule. The schedule is unchanged.">Run now</button>
+      <button class="node-btn node-btn-danger" data-action="loop-cancel" ${data} title="Ask the session to cancel this loop">Cancel</button>
+    </div>`;
 }
 
 function formatAgo(at: number, now: number): string {

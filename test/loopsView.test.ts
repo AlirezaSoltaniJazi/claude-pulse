@@ -78,6 +78,21 @@ describe('Loops section', () => {
     expect(html).toContain('loop-status-active');
   });
 
+  it('offers Run now and Cancel only on an active loop of a live session', () => {
+    const html = generateDashboardHtml(
+      makeData(makeScan([makeLoop(), makeLoop({ id: 'gone', status: 'cancelled' })])),
+      300
+    );
+    expect(html).toContain('data-action="loop-run" data-session="sess-1234567890"');
+    expect(html).toContain('data-loop="abc12345"');
+    expect(html).toContain('data-action="loop-cancel"');
+    expect(html).not.toContain('data-loop="gone"');
+
+    const dead = makeScan([makeLoop()]);
+    dead.sessions[0].isAlive = false;
+    expect(generateDashboardHtml(makeData(dead), 300)).not.toContain('data-action="loop-run"');
+  });
+
   it('says so when the scan found nothing', () => {
     const html = generateDashboardHtml(makeData(makeScan([])), 300);
     expect(html).toContain('No session has scheduled a loop');
