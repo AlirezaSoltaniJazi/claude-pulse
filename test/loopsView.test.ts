@@ -93,6 +93,15 @@ describe('Loops section', () => {
     expect(generateDashboardHtml(makeData(dead), 300)).not.toContain('data-action="loop-run"');
   });
 
+  it('shows no expiry countdown for a loop that is no longer active', () => {
+    const html = generateDashboardHtml(
+      makeData(makeScan([makeLoop({ status: 'cancelled', nextRunAt: null })])),
+      300
+    );
+    expect(html).not.toContain('6d 23h');
+    expect(html).not.toContain('data-action="loop-run"');
+  });
+
   it('says so when the scan found nothing', () => {
     const html = generateDashboardHtml(makeData(makeScan([])), 300);
     expect(html).toContain('No session has scheduled a loop');

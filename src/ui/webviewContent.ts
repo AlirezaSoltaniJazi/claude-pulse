@@ -2251,12 +2251,14 @@ function renderLoopRow(loop: LoopInfo, session: SessionLoops): string {
         ? 'due'
         : `${isApprox ? '~' : ''}${formatIn(loop.nextRunAt, now)}`;
 
+  // A countdown only means something while the job still exists: a cancelled or ended loop
+  // is gone already, and showing "6d 23h" beside it reads as if it were still scheduled.
   const expires =
-    loop.expiresAt === null
-      ? '&mdash;'
-      : loop.expiresAt <= now
-        ? 'expired'
-        : formatDurationDays(loop.expiresAt - now);
+    loop.status === 'expired'
+      ? 'expired'
+      : loop.expiresAt === null || loop.status !== 'active'
+        ? '&mdash;'
+        : formatDurationDays(Math.max(0, loop.expiresAt - now));
 
   return `<tr>
     <td>
