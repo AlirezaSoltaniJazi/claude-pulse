@@ -52,6 +52,7 @@ const makeData = (graph: AgentGraph): ClaudePulseData => ({
   promptCache: null,
   agents: null,
   agentGraph: graph,
+  loops: null,
 });
 
 const makeGraph = (sessions: SessionNode[]): AgentGraph => ({

@@ -25,6 +25,8 @@ export class DashboardPanel implements vscode.Disposable {
   readonly onRefreshData = this._onRefreshData.event;
   private readonly _onKillRequested = new vscode.EventEmitter<KillRequest>();
   readonly onKillRequested = this._onKillRequested.event;
+  private readonly _onScanLoops = new vscode.EventEmitter<void>();
+  readonly onScanLoops = this._onScanLoops.event;
 
   /**
    * Which agent tab is open. Panel state, not extension state, and deliberately not fired
@@ -59,6 +61,8 @@ export class DashboardPanel implements vscode.Disposable {
           this._onResetTimer.fire();
         } else if (message.command === 'refreshData') {
           this._onRefreshData.fire();
+        } else if (message.command === 'scanLoops') {
+          this._onScanLoops.fire();
         } else if (message.command === 'setSessionExpanded') {
           this.viewState = {
             ...this.viewState,
@@ -116,6 +120,7 @@ export class DashboardPanel implements vscode.Disposable {
     this._onResetTimer.dispose();
     this._onRefreshData.dispose();
     this._onKillRequested.dispose();
+    this._onScanLoops.dispose();
   }
 }
 

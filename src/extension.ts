@@ -11,6 +11,7 @@ import { getTodayActivity } from './data/dataAggregator';
 import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
 import { readSessionAgents, readAgentGraph, clearAgentCache } from './data/agentReader';
+import { readLoops, clearLoopCache } from './data/loopReader';
 import {
   buildKillConfirmation,
   killSession,
@@ -52,6 +53,7 @@ let cachedData: ClaudePulseData = {
   promptCache: null,
   agents: null,
   agentGraph: null,
+  loops: null,
 };
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -111,6 +113,9 @@ export function activate(context: vscode.ExtensionContext): void {
       clearScanCache();
       clearModelCache();
       clearAgentCache();
+      clearLoopCache();
+      // The last scan described the old root; showing it would be showing someone else's loops.
+      cachedData = { ...cachedData, loops: null };
       void refreshData(false);
       return;
     }
@@ -123,6 +128,7 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.resetTimer();
   });
   dashboardPanel.onKillRequested((request) => void handleKillRequest(request));
+  dashboardPanel.onScanLoops(() => void scanLoops());
   dashboardPanel.onRefreshData(async () => {
     clearScanCache();
     clearUsageCache();
@@ -355,6 +361,24 @@ async function refreshModelInfo(): Promise<void> {
     cachedData = { ...cachedData, modelInfo };
   }
   await retargetTranscriptWatch(config.claudeHomePath, primarySession);
+  updateUI();
+}
+
+/**
+ * Manual loop scan, run only from the dashboard's Loops button.
+ *
+ * Deliberately outside refreshData(): finding loops means reading every session's full main
+ * transcript, and loops change only when someone schedules or cancels one. The result rides
+ * along in cachedData, so poll-driven re-renders keep showing it until the next click.
+ *
+ * Re-reads the session list itself rather than trusting the last poll's, so a session started
+ * a moment ago is included and one that just exited shows its loops as ended.
+ */
+async function scanLoops(): Promise<void> {
+  const config = configManager.getConfig();
+  const sessions = await readSessions(config.claudeHomePath);
+  const loops = await readLoops(config.claudeHomePath, sessions);
+  cachedData = { ...cachedData, loops };
   updateUI();
 }
 
