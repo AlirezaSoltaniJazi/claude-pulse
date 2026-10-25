@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-25
+
 ### Security
 
 - **Dashboard escapes every session field.** The Session card printed the PID, session id and working
@@ -312,7 +314,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable settings: polling intervals, notification preferences, session reset interval, custom Claude home path
 - Commands: Show Dashboard, Refresh Data, Reset Timer, Toggle Notifications
 
-[Unreleased]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/AlirezaSoltaniJazi/claude-pulse/compare/v0.3.0...v1.0.0
