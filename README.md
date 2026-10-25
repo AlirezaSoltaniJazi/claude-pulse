@@ -24,6 +24,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 
 - **Usage bars** — Every rate-limit window the API reports: current session (5h), weekly (all models), model-specific weekly windows such as `This Week (Fable)`, and extra usage
 - **Prompt cache** — Roughly how long your prompt cache stays warm, estimated from your last request
+- **Loops** — Every `/loop` your sessions have scheduled, grouped by session: the prompt, its schedule (`every 5 min`, `weekdays at 08:57`, or self-paced), status (active, cancelled, completed, expired, ended), how many times it has run, when it last ran, when it runs next, and when it expires. Scanned only when you press **Show loops** / **Refresh loops**
 - **Session info** — Active session PID, working directory, duration, and reset time
 - **Weekly summary** — Total tokens, messages, sessions, and tool calls for the current week
 - **Sonnet breakdown** — Sonnet token usage and percentage of total
@@ -127,7 +128,7 @@ Claude Pulse reads data from two sources:
 
 2. **Anthropic API** (`api.anthropic.com/api/oauth/usage`) — When OAuth credentials are available, Claude Pulse fetches live usage percentages and reset times. Credentials are read from the macOS Keychain or `~/.claude/.credentials.json` — the extension never stores credentials itself.
 
-Subagent transcripts are by far the largest files Claude Code writes, so the Agents and Agent Graph sections read them only while the dashboard is open, and each finished agent is read once and then cached. The only action Claude Pulse ever takes beyond reading is terminating a session, and only when you confirm it.
+Subagent transcripts are by far the largest files Claude Code writes, so the Agents and Agent Graph sections read them only while the dashboard is open, and each finished agent is read once and then cached. Loops live only in the memory of the Claude session that scheduled them — nothing about them is written to disk — so the Loops section reconstructs them from the `CronCreate`, `CronDelete` and `ScheduleWakeup` calls in each session's transcript. Because that means reading whole transcripts, it runs only when you press its button, never on the poll. The only action Claude Pulse ever takes beyond reading is terminating a session, and only when you confirm it.
 
 ## Privacy & Security
 
