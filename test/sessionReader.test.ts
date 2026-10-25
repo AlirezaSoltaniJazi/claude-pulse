@@ -72,6 +72,24 @@ describe('readSessions', () => {
     expect(result).toEqual([]);
   });
 
+  it('skips sessions whose fields are the wrong shape', async () => {
+    const bad = [
+      makeSession({ pid: '<img src=x>' as unknown as number }),
+      makeSession({ pid: -1 }),
+      makeSession({ pid: 12.5 }),
+      makeSession({ sessionId: '../../etc' }),
+      makeSession({ sessionId: 42 as unknown as string }),
+      makeSession({ cwd: 7 as unknown as string }),
+    ];
+    mockReaddir.mockResolvedValue(bad.map((_, i) => `${i}.json`) as any);
+    for (const session of bad) {
+      mockReadFile.mockResolvedValueOnce(JSON.stringify(session) as any);
+    }
+
+    const result = await readSessions('/fake/home');
+    expect(result).toEqual([]);
+  });
+
   it('returns empty array when sessions directory does not exist', async () => {
     mockReaddir.mockRejectedValue(new Error('ENOENT'));
 

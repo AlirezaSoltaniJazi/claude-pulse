@@ -41,6 +41,7 @@ agents.md
 scripts/**
 
 # Local scratch and build output that would otherwise be packaged verbatim.
+coverage/**
 *.vsix
 .DS_Store
 **/.DS_Store

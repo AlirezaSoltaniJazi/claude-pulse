@@ -45,6 +45,8 @@ export class DashboardPanel implements vscode.Disposable {
         {
           enableScripts: true,
           retainContextWhenHidden: true,
+          // The dashboard is self-contained HTML; it never needs to load a local file.
+          localResourceRoots: [],
         }
       );
 

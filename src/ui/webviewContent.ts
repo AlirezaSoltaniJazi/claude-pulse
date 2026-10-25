@@ -1,3 +1,5 @@
+import * as crypto from 'crypto';
+
 import {
   AgentGraph,
   AgentMap,
@@ -113,7 +115,7 @@ function getSubtitleText(data: ClaudePulseData): string {
     }
   }
   if (data.stats) {
-    return `Stats cached from ${data.stats.lastComputedDate}`;
+    return `Stats cached from ${escapeHtml(String(data.stats.lastComputedDate))}`;
   }
   return 'No data available';
 }
@@ -145,10 +147,14 @@ export function generateDashboardHtml(
   resetIntervalMinutes: number,
   viewState: DashboardViewState = EMPTY_VIEW_STATE
 ): string {
+  // Only the one <script> below carries this nonce, so markup that slips past escapeHtml()
+  // cannot run script, and default-src 'none' leaves it no way to load or send anything.
+  const nonce = crypto.randomBytes(16).toString('base64');
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claude Pulse Dashboard</title>
   <style>
@@ -802,10 +808,10 @@ export function generateDashboardHtml(
   <div class="dashboard-header">
     <h1>Claude Pulse</h1>
     <span class="subtitle">${getSubtitleText(data)}</span>
-    <button class="refresh-btn" onclick="refreshData()">Refresh</button>
+    <button class="refresh-btn" data-refresh>Refresh</button>
   </div>
 
-  <script>
+  <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     function refreshData() {
       vscode.postMessage({ command: 'refreshData' });
@@ -823,6 +829,19 @@ export function generateDashboardHtml(
     document.addEventListener('click', function (event) {
       const target = event.target;
       if (!target || typeof target.closest !== 'function') return;
+
+      // The CSP has no 'unsafe-inline' for scripts, so inline onclick= handlers would never
+      // fire; the header controls dispatch from here like everything else.
+      if (target.closest('button[data-refresh]')) {
+        refreshData();
+        return;
+      }
+      const sectionHeader = target.closest('[data-section]');
+      if (sectionHeader) {
+        toggleSection(sectionHeader.dataset.section);
+        return;
+      }
+
       const btn = target.closest('button[data-action], button[data-tab]');
 
       /*
@@ -948,7 +967,7 @@ export function generateDashboardHtml(
   </script>
 
   <div class="section">
-    <div class="section-header" onclick="toggleSection('usage')">
+    <div class="section-header" data-section="usage">
       <span class="section-toggle" id="toggle-usage">&#9660;</span>
       <h2>Usage</h2>
     </div>
@@ -961,7 +980,7 @@ export function generateDashboardHtml(
   </div>
 
   <div class="section">
-    <div class="section-header" onclick="toggleSection('sessions')">
+    <div class="section-header" data-section="sessions">
       <span class="section-toggle" id="toggle-sessions">&#9660;</span>
       <h2>Sessions</h2>
     </div>
@@ -974,7 +993,7 @@ export function generateDashboardHtml(
   </div>
 
   <div class="section">
-    <div class="section-header" onclick="toggleSection('tokens')">
+    <div class="section-header" data-section="tokens">
       <span class="section-toggle" id="toggle-tokens">&#9660;</span>
       <h2>Tokens</h2>
     </div>
@@ -992,7 +1011,7 @@ export function generateDashboardHtml(
   ${renderAgentsSection(data.agents)}
 
   <div class="section">
-    <div class="section-header" onclick="toggleSection('activity')">
+    <div class="section-header" data-section="activity">
       <span class="section-toggle" id="toggle-activity">&#9660;</span>
       <h2>Activity</h2>
     </div>
@@ -1045,7 +1064,7 @@ function renderUsageCard(usage: ClaudeUsage | null): string {
         </div>
       </div>`;
     } else if (extra.monthly_limit > 0) {
-      const currencySymbol = getCurrencySymbol(extra.currency);
+      const currencySymbol = escapeHtml(getCurrencySymbol(extra.currency));
       const spent = (extra.used_credits / 100).toFixed(2);
       const limit = (extra.monthly_limit / 100).toFixed(2);
       extraUsage = `<div class="usage-bar" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);">
@@ -1121,15 +1140,15 @@ function renderSessionCards(data: ClaudePulseData, resetIntervalMinutes: number)
       </div>
       <div class="stat-row">
         <span class="stat-label">PID</span>
-        <span class="stat-value">${session.pid}</span>
+        <span class="stat-value">${escapeHtml(String(session.pid))}</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">Session ID</span>
-        <span class="stat-value">${session.sessionId.substring(0, 8)}...</span>
+        <span class="stat-value">${escapeHtml(session.sessionId.substring(0, 8))}...</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">Working Dir</span>
-        <span class="stat-value cwd-value" title="${session.cwd}">${session.cwd}</span>
+        <span class="stat-value cwd-value" title="${escapeHtml(session.cwd)}">${escapeHtml(session.cwd)}</span>
       </div>
       <div class="stat-row">
         <span class="stat-label">Started</span>
@@ -1325,7 +1344,7 @@ function renderLifetimeCard(data: ClaudePulseData): string {
     </div>
     <div class="stat-row">
       <span class="stat-label">Favorite Model</span>
-      <span class="stat-value">${favoriteModel}</span>
+      <span class="stat-value">${escapeHtml(favoriteModel)}</span>
     </div>
     <div class="stat-row">
       <span class="stat-label">Total Sessions</span>
@@ -1544,7 +1563,7 @@ function renderAgentGraphSection(graph: AgentGraph | null, viewState: DashboardV
     : '';
 
   return `<div class="section">
-    <div class="section-header" onclick="toggleSection('graph')">
+    <div class="section-header" data-section="graph">
       <span class="section-toggle" id="toggle-graph">&#9660;</span>
       <h2>Agent Graph</h2>
     </div>
@@ -1758,9 +1777,9 @@ function renderSessionNode(
 
   // A dead session has nothing to signal, so it gets no button rather than a disabled one.
   const kill = session.isAlive
-    ? `<button class="node-btn node-btn-danger" title="Send SIGTERM to PID ${session.pid}"
+    ? `<button class="node-btn node-btn-danger" title="Send SIGTERM to PID ${escapeHtml(String(session.pid))}"
          data-action="kill-session"
-         data-pid="${session.pid}"
+         data-pid="${escapeHtml(String(session.pid))}"
          data-session="${escapeHtml(session.sessionId)}"
          data-label="${escapeHtml(session.label)}">Kill</button>`
     : '';
@@ -1905,7 +1924,7 @@ function renderAgentNode(
     agent.status === 'running' && session.isAlive
       ? `<button class="node-btn node-btn-danger" title="Stopping a subagent means terminating its session"
            data-action="kill-agent"
-           data-pid="${session.pid}"
+           data-pid="${escapeHtml(String(session.pid))}"
            data-session="${escapeHtml(session.sessionId)}"
            data-agent="${escapeHtml(agent.description)}"
            data-label="${escapeHtml(session.label)}">Stop</button>`
@@ -1986,7 +2005,7 @@ function renderAgentsSection(agents: AgentMap | null): string {
     : '';
 
   return `<div class="section">
-    <div class="section-header" onclick="toggleSection('agents')">
+    <div class="section-header" data-section="agents">
       <span class="section-toggle" id="toggle-agents">&#9660;</span>
       <h2>Agents</h2>
     </div>

@@ -13,8 +13,8 @@ export async function readSessions(claudeHomePath: string): Promise<SessionFile[
     for (const file of jsonFiles) {
       try {
         const content = await fs.promises.readFile(path.join(sessionsDir, file), 'utf-8');
-        const session = JSON.parse(content) as SessionFile;
-        if (session.pid && session.sessionId) {
+        const session: unknown = JSON.parse(content);
+        if (isValidSessionFile(session)) {
           sessions.push(session);
         }
       } catch {
@@ -26,6 +26,24 @@ export async function readSessions(claudeHomePath: string): Promise<SessionFile[
   } catch {
     return [];
   }
+}
+
+/**
+ * Session files are written by another program, and their fields reach process signals, file
+ * paths and the dashboard's HTML. The sessionId pattern keeps `../` out of the transcript paths
+ * built from it; a non-integer pid would otherwise be rendered and signalled as-is.
+ */
+function isValidSessionFile(value: unknown): value is SessionFile {
+  if (typeof value !== 'object' || value === null) return false;
+  const s = value as Record<string, unknown>;
+  return (
+    typeof s.pid === 'number' &&
+    Number.isInteger(s.pid) &&
+    s.pid > 0 &&
+    typeof s.sessionId === 'string' &&
+    /^[A-Za-z0-9_-]+$/.test(s.sessionId) &&
+    typeof s.cwd === 'string'
+  );
 }
 
 export function isProcessAlive(pid: number): boolean {

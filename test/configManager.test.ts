@@ -75,6 +75,12 @@ describe('ConfigManager', () => {
     expect(config.usageRefreshIntervalSeconds).toBe(120);
   });
 
+  it('should clamp pollingIntervalSeconds to its schema minimum', () => {
+    // The schema minimum is advisory; 0 would make the stats watcher stat() in a tight loop.
+    setMockConfig({ pollingIntervalSeconds: 0 });
+    expect(configManager.getConfig().pollingIntervalSeconds).toBe(5);
+  });
+
   it('should clamp promptCacheTtlMinutes into its supported range', () => {
     // A zero TTL renders a permanently-cold cache and a huge one a permanently-warm one;
     // both read as the feature being broken rather than as a bad setting.

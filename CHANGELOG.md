@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Dashboard escapes every session field.** The Session card printed the PID, session id and working
+  directory as raw HTML, so a project folder whose name contained markup could run script in the dashboard.
+  The dashboard now also carries a Content-Security-Policy that only runs its own nonce-tagged script and
+  blocks all network and file loads, and the webview can no longer read local files.
+- **Session files are validated before use.** A session file must have an integer PID and a plain
+  `[A-Za-z0-9_-]` session id before it is shown, signalled, or used to build a transcript path.
+- **`claudePulse.claudeHomePath` is machine-scoped.** It can only be set in user settings, so a workspace's
+  `.vscode/settings.json` can no longer point the extension at session files it ships.
+- **Keychain lookup no longer goes through a shell**, and credential parse errors are logged without
+  quoting the credential.
+- `claudePulse.pollingIntervalSeconds` is clamped to its 5-second minimum.
+- Dev toolchain updated to clear `npm audit` advisories in vitest, vite and source-map-js.
+
 ## [1.1.1] - 2026-10-04
 
 ## [1.1.0] - 2026-10-04
