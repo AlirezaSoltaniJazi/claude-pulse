@@ -24,7 +24,7 @@ Open with the **Claude Pulse: Show Dashboard** command to see:
 
 - **Usage bars** — Every rate-limit window the API reports: current session (5h), weekly (all models), model-specific weekly windows such as `This Week (Fable)`, and extra usage
 - **Prompt cache** — Roughly how long your prompt cache stays warm, estimated from your last request
-- **Loops** — Every `/loop` your sessions have scheduled, grouped by session: the prompt, its schedule (`every 5 min`, `weekdays at 08:57`, or self-paced), status (active, cancelled, completed, expired, ended), how many times it has run, when it last ran, when it runs next, and when it expires. Scanned only when you press **Show loops** / **Refresh loops**
+- **Loops** — Every `/loop` your sessions have scheduled, grouped by session: the prompt, its schedule (`every 5 min`, `weekdays at 08:57`, or self-paced), status (active, cancelled, completed, expired, ended), how many times it has run, when it last ran, when it runs next, and when it expires. Scanned only when you press **Show loops** / **Refresh loops**. Each active loop has **Run now** (run its prompt ahead of schedule) and **Cancel** buttons; both are confirmed first and are typed into the session's terminal, or copied to the clipboard when the session is not in one of this window's terminals
 - **Session info** — Active session PID, working directory, duration, and reset time
 - **Weekly summary** — Total tokens, messages, sessions, and tool calls for the current week
 - **Sonnet breakdown** — Sonnet token usage and percentage of total
