@@ -10,6 +10,7 @@ import {
   SessionNode,
 } from '../types';
 import { resolveTranscriptPath } from './modelReader';
+import { forEachLine } from '../utils/jsonlLines';
 import { isProcessAlive } from './sessionReader';
 import {
   AGENT_GRAPH_CACHE_TTL_MS,
@@ -513,13 +514,6 @@ async function readTranscriptStats(filePath: string): Promise<TranscriptStats> {
     return cached.stats;
   }
 
-  let content: string;
-  try {
-    content = await fs.promises.readFile(filePath, 'utf-8');
-  } catch (_e) {
-    return NO_STATS;
-  }
-
   let tokens = 0;
   let turns = 0;
   let model: string | null = null;
@@ -527,8 +521,7 @@ async function readTranscriptStats(filePath: string): Promise<TranscriptStats> {
   let lastAt = 0;
   let lastStopReason: string | null = null;
 
-  for (const line of content.split('\n')) {
-    if (!line) continue;
+  const onLine = (line: string): void => {
     try {
       const record = JSON.parse(line) as {
         type?: unknown;
@@ -542,7 +535,7 @@ async function readTranscriptStats(filePath: string): Promise<TranscriptStats> {
         if (at > lastAt) lastAt = at;
       }
 
-      if (record.type !== 'assistant' || !record.message) continue;
+      if (record.type !== 'assistant' || !record.message) return;
       turns++;
 
       const rawModel = record.message.model;
@@ -565,6 +558,14 @@ async function readTranscriptStats(filePath: string): Promise<TranscriptStats> {
     } catch (_e) {
       // Skip malformed JSONL lines (the agent may be mid-append)
     }
+  };
+
+  // Streamed: a subagent transcript can run to tens of megabytes, and the graph reads every
+  // agent of every session the first time it opens.
+  try {
+    await forEachLine(filePath, 0, onLine, { includeUnterminated: true });
+  } catch (_e) {
+    return NO_STATS;
   }
 
   const stats: TranscriptStats = {

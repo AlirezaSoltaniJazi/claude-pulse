@@ -281,7 +281,13 @@ export async function resolveTranscriptPath(
     }
   }
 
-  transcriptPathCache.set(session.sessionId, { transcriptPath: resolved, timestamp: Date.now() });
+  const now = Date.now();
+  // Expired entries are only ever overwritten, never read, so without this sweep every session
+  // id the extension has seen stays in the map for the life of the window.
+  for (const [id, entry] of transcriptPathCache) {
+    if (now - entry.timestamp >= MODEL_INFO_CACHE_TTL_MS) transcriptPathCache.delete(id);
+  }
+  transcriptPathCache.set(session.sessionId, { transcriptPath: resolved, timestamp: now });
   return resolved;
 }
 

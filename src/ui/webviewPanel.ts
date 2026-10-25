@@ -25,6 +25,15 @@ export class DashboardPanel implements vscode.Disposable {
   readonly onRefreshData = this._onRefreshData.event;
   private readonly _onKillRequested = new vscode.EventEmitter<KillRequest>();
   readonly onKillRequested = this._onKillRequested.event;
+  private readonly _onDidBecomeVisible = new vscode.EventEmitter<void>();
+  /** The panel came back on screen after updates were skipped while it was hidden. */
+  readonly onDidBecomeVisible = this._onDidBecomeVisible.event;
+
+  /**
+   * Set when an update arrived while the panel was hidden and was skipped. Every render
+   * replaces the whole webview document, so rendering a tab nobody can see is pure waste.
+   */
+  private isStale = false;
 
   /**
    * Which agent tab is open. Panel state, not extension state, and deliberately not fired
@@ -52,6 +61,14 @@ export class DashboardPanel implements vscode.Disposable {
 
       this.panel.onDidDispose(() => {
         this.panel = null;
+        this.isStale = false;
+      });
+
+      this.panel.onDidChangeViewState((event) => {
+        if (event.webviewPanel.visible && this.isStale) {
+          this.isStale = false;
+          this._onDidBecomeVisible.fire();
+        }
       });
 
       this.panel.webview.onDidReceiveMessage((message) => {
@@ -82,7 +99,12 @@ export class DashboardPanel implements vscode.Disposable {
   }
 
   update(data: ClaudePulseData, resetIntervalMinutes: number): void {
-    if (this.panel) this.render(data, resetIntervalMinutes);
+    if (!this.panel) return;
+    if (!this.isVisible) {
+      this.isStale = true;
+      return;
+    }
+    this.render(data, resetIntervalMinutes);
   }
 
   /**
@@ -106,8 +128,18 @@ export class DashboardPanel implements vscode.Disposable {
     this.panel.webview.html = generateDashboardHtml(data, resetIntervalMinutes, this.viewState);
   }
 
-  get isVisible(): boolean {
+  /** The panel exists, whether or not its tab is showing. */
+  get isOpen(): boolean {
     return this.panel !== null;
+  }
+
+  /**
+   * The panel's tab is actually on screen. This is what gates both rendering and the agent
+   * scans: a dashboard left open in a background tab used to keep scanning subagent
+   * transcripts and rebuilding its HTML every few seconds for as long as the window lived.
+   */
+  get isVisible(): boolean {
+    return this.panel !== null && this.panel.visible !== false;
   }
 
   dispose(): void {
@@ -116,6 +148,7 @@ export class DashboardPanel implements vscode.Disposable {
     this._onResetTimer.dispose();
     this._onRefreshData.dispose();
     this._onKillRequested.dispose();
+    this._onDidBecomeVisible.dispose();
   }
 }
 

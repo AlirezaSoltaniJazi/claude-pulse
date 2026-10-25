@@ -89,6 +89,8 @@ export const window = {
     reveal: vi.fn(),
     dispose: vi.fn(),
     onDidDispose: vi.fn(),
+    onDidChangeViewState: vi.fn(),
+    visible: true,
   })),
   showInformationMessage: vi.fn(),
   showWarningMessage: vi.fn(),

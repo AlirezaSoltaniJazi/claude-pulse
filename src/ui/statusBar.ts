@@ -34,6 +34,15 @@ export class StatusBar implements vscode.Disposable {
   private modelInfo: ModelInfo | null = null;
   private promptCache: PromptCacheInfo | null = null;
 
+  /**
+   * What the item last showed. The render runs every second, and every property write on a
+   * status bar item is a message to the main process — so values are only written when they
+   * actually change, which for most ticks is never.
+   */
+  private shownText: string | null = null;
+  private shownTooltip: string | null = null;
+  private shownBackground: string | null = null;
+
   constructor() {
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     this.statusBarItem.command = 'claudePulse.showDashboard';
@@ -65,13 +74,13 @@ export class StatusBar implements vscode.Disposable {
 
   private render(): void {
     if (!this.config) {
-      this.statusBarItem.text = '$(pulse) Claude Pulse';
-      this.statusBarItem.tooltip = 'Loading...';
+      this.apply('$(pulse) Claude Pulse', 'Loading...', null);
       return;
     }
 
     const parts: string[] = ['$(pulse)'];
     const tooltipParts: string[] = [];
+    let background: string | null = null;
 
     // Usage percentage — every window the API named, whatever it named them.
     const limits = resolveLimits(this.usage);
@@ -91,13 +100,9 @@ export class StatusBar implements vscode.Disposable {
 
       // Color based on max utilization (3-tier: VS Code only supports warning + error backgrounds)
       if (maxPct >= USAGE_TIER_CRITICAL) {
-        this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        background = 'statusBarItem.errorBackground';
       } else if (maxPct >= USAGE_TIER_HIGH) {
-        this.statusBarItem.backgroundColor = new vscode.ThemeColor(
-          'statusBarItem.warningBackground'
-        );
-      } else {
-        this.statusBarItem.backgroundColor = undefined;
+        background = 'statusBarItem.warningBackground';
       }
 
       // Reset timer — matches the displayed window (session preferred, max fallback)
@@ -121,8 +126,6 @@ export class StatusBar implements vscode.Disposable {
         }
       }
     } else {
-      this.statusBarItem.backgroundColor = undefined;
-
       // No usable window — either no API data at all, or a response whose windows were all
       // null. Both mean the same thing to the user, so both get the estimated timer.
       if (this.config.statusBar.showResetTimer) {
@@ -247,9 +250,29 @@ export class StatusBar implements vscode.Disposable {
       }
     }
 
-    this.statusBarItem.text = parts.join(' ');
-    this.statusBarItem.tooltip =
-      tooltipParts.length > 0 ? tooltipParts.join(' | ') : 'Click to open Claude Pulse dashboard';
+    this.apply(
+      parts.join(' '),
+      tooltipParts.length > 0 ? tooltipParts.join(' | ') : 'Click to open Claude Pulse dashboard',
+      background
+    );
+  }
+
+  /** Writes only the properties that differ from what is already shown. */
+  private apply(text: string, tooltip: string, background: string | null): void {
+    if (text !== this.shownText) {
+      this.statusBarItem.text = text;
+      this.shownText = text;
+    }
+    if (tooltip !== this.shownTooltip) {
+      this.statusBarItem.tooltip = tooltip;
+      this.shownTooltip = tooltip;
+    }
+    if (background !== this.shownBackground) {
+      this.statusBarItem.backgroundColor = background
+        ? new vscode.ThemeColor(background)
+        : undefined;
+      this.shownBackground = background;
+    }
   }
 
   dispose(): void {

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- **The weekly token scan no longer re-reads every transcript.** Each transcript is cached on its size and
+  modification time, so an unchanged file is not read at all and a growing one is read only from where the
+  last scan stopped. Files are streamed instead of loaded whole. On a machine with ~300 MB of transcripts this
+  week, a repeat scan went from ~1 s and a ~510 MB memory spike to ~6 ms and no spike.
+- **One scan and one refresh at a time.** A burst of session-file events used to start several full refreshes
+  in parallel, each with its own scan (1.5 GB at peak for five). Session events are now debounced, and
+  refreshes and scans that overlap share a single run.
+- **A dashboard in a background tab stays idle.** It no longer rebuilds its page or scans subagent
+  transcripts while hidden, and catches up when shown. While visible, rebuilds caused by Claude writing to its
+  transcript happen at most every 5 seconds.
+- The status bar only updates when its text actually changes, instead of every second.
+
+### Fixed
+
+- Task-complete notifications stopped for a session whose transcript was rewritten shorter.
+- A failed read in the task-complete detector leaked a file descriptor.
+
 ## [1.1.2] - 2026-10-25
 
 ### Security

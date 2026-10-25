@@ -68,6 +68,8 @@ function mountPanel(): {
     reveal: vi.fn(),
     dispose: vi.fn(),
     onDidDispose: vi.fn(),
+    onDidChangeViewState: vi.fn(),
+    visible: true,
   };
   vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(stub as never);
 
@@ -77,6 +79,68 @@ function mountPanel(): {
     html: () => stub.webview.html,
   };
 }
+
+describe('DashboardPanel — hidden tabs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mountWithVisibility(): {
+    panel: DashboardPanel;
+    stub: { visible: boolean; webview: { html: string } };
+    changeViewState: () => void;
+  } {
+    let viewStateHandler: ((e: unknown) => void) | null = null;
+    const stub = {
+      visible: true,
+      webview: { html: '', onDidReceiveMessage: vi.fn() },
+      reveal: vi.fn(),
+      dispose: vi.fn(),
+      onDidDispose: vi.fn(),
+      onDidChangeViewState: (cb: (e: unknown) => void) => {
+        viewStateHandler = cb;
+      },
+    };
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(stub as never);
+    return {
+      panel: new DashboardPanel(),
+      stub,
+      changeViewState: () => viewStateHandler?.({ webviewPanel: stub }),
+    };
+  }
+
+  it('skips renders while hidden and asks for a refresh when shown again', () => {
+    const { panel, stub, changeViewState } = mountWithVisibility();
+    const onVisible = vi.fn();
+    panel.onDidBecomeVisible(onVisible);
+
+    panel.show(makeData([makeSession('s1')]), 300);
+    const shown = stub.webview.html;
+
+    stub.visible = false;
+    expect(panel.isVisible).toBe(false);
+    expect(panel.isOpen).toBe(true);
+    panel.update(makeData([makeSession('s2')]), 300);
+    expect(stub.webview.html).toBe(shown);
+
+    stub.visible = true;
+    changeViewState();
+    expect(onVisible).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask for a refresh when nothing was skipped', () => {
+    const { panel, stub, changeViewState } = mountWithVisibility();
+    const onVisible = vi.fn();
+    panel.onDidBecomeVisible(onVisible);
+    panel.show(makeData([makeSession('s1')]), 300);
+
+    stub.visible = false;
+    changeViewState();
+    stub.visible = true;
+    changeViewState();
+    expect(onVisible).not.toHaveBeenCalled();
+  });
+});
 
 describe('DashboardPanel — remembered session expansion', () => {
   beforeEach(() => {
