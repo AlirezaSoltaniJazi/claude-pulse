@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -148,8 +148,11 @@ async function getCredentialsFromKeychain(): Promise<OAuthCredentials | null> {
   const securityBin = '/usr/bin/security';
 
   return new Promise((resolve) => {
-    exec(
-      `${securityBin} find-generic-password -s "${KEYCHAIN_SERVICE}"`,
+    // execFile, not exec: the account name below comes from Keychain output, and no shell
+    // means nothing in it can be expanded.
+    execFile(
+      securityBin,
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE],
       { timeout: KEYCHAIN_TIMEOUT_MS },
       (err, stdout) => {
         if (err) {
@@ -160,8 +163,9 @@ async function getCredentialsFromKeychain(): Promise<OAuthCredentials | null> {
         const acctMatch = stdout.match(/"acct"<blob>="([^"]+)"/);
         const account = acctMatch ? acctMatch[1] : os.userInfo().username;
 
-        exec(
-          `${securityBin} find-generic-password -s "${KEYCHAIN_SERVICE}" -a "${account}" -w`,
+        execFile(
+          securityBin,
+          ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account, '-w'],
           { timeout: KEYCHAIN_TIMEOUT_MS },
           (err2, stdout2) => {
             if (err2) {
@@ -182,9 +186,7 @@ async function getCredentialsFromKeychain(): Promise<OAuthCredentials | null> {
                 resolve(null);
               }
             } catch (e) {
-              log(
-                `Failed to parse keychain credentials: ${e instanceof Error ? e.message : String(e)}`
-              );
+              log(`Failed to parse keychain credentials: ${describeCredentialError(e)}`);
               resolve(null);
             }
           }
@@ -208,9 +210,15 @@ async function getCredentialsFromFile(): Promise<OAuthCredentials | null> {
       };
     }
   } catch (e) {
-    log(`Failed to read credentials file: ${e instanceof Error ? e.message : String(e)}`);
+    log(`Failed to read credentials file: ${describeCredentialError(e)}`);
   }
   return null;
+}
+
+/** JSON.parse errors quote part of their input, and here the input is the OAuth token. */
+function describeCredentialError(e: unknown): string {
+  if (e instanceof SyntaxError) return 'invalid JSON';
+  return e instanceof Error ? e.message : String(e);
 }
 
 interface CallResult {
