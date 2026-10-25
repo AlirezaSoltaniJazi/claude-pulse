@@ -9,6 +9,7 @@ import {
   DEFAULT_TASK_IDLE_SECONDS,
   DEFAULT_USAGE_REFRESH_INTERVAL_SEC,
   MAX_PROMPT_CACHE_TTL_MINUTES,
+  MIN_POLLING_INTERVAL_SEC,
   MIN_PROMPT_CACHE_TTL_MINUTES,
   MIN_TASK_IDLE_SECONDS,
   MIN_USAGE_REFRESH_INTERVAL_SEC,
@@ -90,9 +91,9 @@ export class ConfigManager implements vscode.Disposable {
         DEFAULT_SESSION_RESET_MINUTES
       ),
       sessionTokenLimit: cfg.get<number>('sessionTokenLimit', DEFAULT_SESSION_TOKEN_LIMIT),
-      pollingIntervalSeconds: cfg.get<number>(
-        'pollingIntervalSeconds',
-        DEFAULT_POLLING_INTERVAL_SEC
+      pollingIntervalSeconds: Math.max(
+        cfg.get<number>('pollingIntervalSeconds', DEFAULT_POLLING_INTERVAL_SEC),
+        MIN_POLLING_INTERVAL_SEC
       ),
       usageRefreshIntervalSeconds: Math.max(
         cfg.get<number>('usageRefreshIntervalSeconds', DEFAULT_USAGE_REFRESH_INTERVAL_SEC),
