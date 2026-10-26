@@ -2,7 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { SessionFile } from '../types';
-import { TASK_DETECTOR_POLL_MS, TASK_NOTIFICATION_COOLDOWN_MS } from '../constants';
+import {
+  TASK_DETECTOR_MAX_READ_BYTES,
+  TASK_DETECTOR_POLL_MS,
+  TASK_NOTIFICATION_COOLDOWN_MS,
+} from '../constants';
 
 interface SessionWatch {
   jsonlPath: string;
@@ -71,13 +75,19 @@ export class TaskCompletionDetector implements vscode.Disposable {
       const currentSize = getFileSize(watch.jsonlPath);
       if (currentSize > watch.lastSize) {
         this.onFileChanged(sessionId, watch, currentSize);
+      } else if (currentSize < watch.lastSize) {
+        // Rewritten shorter (or gone): without re-baselining, every later append below the
+        // old size would go unnoticed and the session would never report completion again.
+        watch.lastSize = currentSize;
       }
     }
   }
 
   private onFileChanged(sessionId: string, watch: SessionWatch, newSize: number): void {
-    // Read only the new bytes
-    const newContent = readNewBytes(watch.jsonlPath, watch.lastSize, newSize);
+    // Read only the new bytes — and only the tail of them. hasEndTurn() looks at the last
+    // records alone, and one append can be a multi-megabyte tool result.
+    const from = Math.max(watch.lastSize, newSize - TASK_DETECTOR_MAX_READ_BYTES);
+    const newContent = readNewBytes(watch.jsonlPath, from, newSize);
     watch.lastSize = newSize;
 
     // Cancel any pending idle timer — new activity detected
@@ -140,11 +150,15 @@ function getFileSize(filePath: string): number {
 function readNewBytes(filePath: string, fromByte: number, toByte: number): string {
   try {
     const fd = fs.openSync(filePath, 'r');
-    const length = toByte - fromByte;
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, fromByte);
-    fs.closeSync(fd);
-    return buffer.toString('utf-8');
+    try {
+      const length = toByte - fromByte;
+      const buffer = Buffer.alloc(length);
+      const bytesRead = fs.readSync(fd, buffer, 0, length, fromByte);
+      return buffer.toString('utf-8', 0, bytesRead);
+    } finally {
+      // Closed even when the read throws — a leaked descriptor every poll adds up.
+      fs.closeSync(fd);
+    }
   } catch (_e) {
     return '';
   }

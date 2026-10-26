@@ -9,7 +9,7 @@ import {
   isProcessAlive,
 } from './data/sessionReader';
 import { getTodayActivity } from './data/dataAggregator';
-import { scanWeeklyUsage, clearScanCache } from './data/jsonlScanner';
+import { scanWeeklyUsage, clearScanCache, clearAllScanCaches } from './data/jsonlScanner';
 import { readModelInfo, clearModelCache, resolveTranscriptPath } from './data/modelReader';
 import { readSessionAgents, readAgentGraph, clearAgentCache } from './data/agentReader';
 import { readLoops, clearLoopCache } from './data/loopReader';
@@ -29,6 +29,7 @@ import { NotificationManager } from './notifications/notificationManager';
 import { TaskCompletionDetector } from './data/taskCompletionDetector';
 import { AgentNode, ClaudePulseData, ModelInfo, PromptCacheInfo, SessionFile } from './types';
 import {
+  DASHBOARD_MIN_RENDER_INTERVAL_MS,
   MIN_USAGE_REFRESH_INTERVAL_SEC,
   USAGE_OPPORTUNISTIC_MIN_INTERVAL_MS,
   USAGE_RATE_LIMIT_COOLOFF_MS,
@@ -42,6 +43,8 @@ let sessionMonitor: SessionMonitor;
 let taskCompletionDetector: TaskCompletionDetector;
 let notificationManager: NotificationManager;
 let usageRefreshInterval: ReturnType<typeof setInterval> | null = null;
+let dashboardRenderTimer: ReturnType<typeof setTimeout> | null = null;
+let lastDashboardRenderAt = 0;
 
 let cachedData: ClaudePulseData = {
   stats: null,
@@ -112,7 +115,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (newConfig.claudeHomePath !== watchedHomePath) {
       watchedHomePath = newConfig.claudeHomePath;
       fileWatcher.updateClaudeHomePath(newConfig.claudeHomePath);
-      clearScanCache();
+      clearAllScanCaches();
       clearModelCache();
       clearAgentCache();
       clearLoopCache();
@@ -130,6 +133,9 @@ export function activate(context: vscode.ExtensionContext): void {
     statusBar.resetTimer();
   });
   dashboardPanel.onKillRequested((request) => void handleKillRequest(request));
+  // Updates are skipped while the panel is hidden, so it catches up when it is shown again.
+  // A full refresh rather than a re-render: the agent scans were skipped too.
+  dashboardPanel.onDidBecomeVisible(() => void refreshData(false));
   dashboardPanel.onScanLoops(() => void scanLoops());
   dashboardPanel.onLoopAction((request) => void handleLoopAction(request));
   dashboardPanel.onRefreshData(async () => {
@@ -202,6 +208,7 @@ export function activate(context: vscode.ExtensionContext): void {
     {
       dispose: () => {
         if (usageRefreshInterval) clearInterval(usageRefreshInterval);
+        if (dashboardRenderTimer) clearTimeout(dashboardRenderTimer);
       },
     }
   );
@@ -249,7 +256,40 @@ function pickPrimarySession(
  */
 let modelInfoSeq = 0;
 
-async function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
+let refreshInFlight: Promise<void> | null = null;
+let trailingRefresh: Promise<void> | null = null;
+let trailingRefreshUsage = false;
+
+/**
+ * Single-flight wrapper around doRefreshData().
+ *
+ * Refreshes are requested from many places at once — the sessions watcher, the stats poll,
+ * the dashboard, workspace changes — and each one used to run concurrently, every one of them
+ * walking the same transcripts. Now a request that arrives mid-refresh waits for it and then
+ * gets ONE trailing refresh shared with every other request that arrived meanwhile, so nothing
+ * that changed during the run is missed and nothing runs twice in parallel.
+ */
+function refreshData(alsoRefreshUsage: boolean = false): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefreshData(alsoRefreshUsage).finally(() => {
+      refreshInFlight = null;
+    });
+    return refreshInFlight;
+  }
+
+  trailingRefreshUsage = trailingRefreshUsage || alsoRefreshUsage;
+  if (!trailingRefresh) {
+    trailingRefresh = refreshInFlight.then(() => {
+      trailingRefresh = null;
+      const usage = trailingRefreshUsage;
+      trailingRefreshUsage = false;
+      return refreshData(usage);
+    });
+  }
+  return trailingRefresh;
+}
+
+async function doRefreshData(alsoRefreshUsage: boolean): Promise<void> {
   const config = configManager.getConfig();
 
   const [stats, sessions] = await Promise.all([
@@ -364,7 +404,9 @@ async function refreshModelInfo(): Promise<void> {
     cachedData = { ...cachedData, modelInfo };
   }
   await retargetTranscriptWatch(config.claudeHomePath, primarySession);
-  updateUI();
+  // Throttled: this runs on every transcript append, every couple of seconds while Claude
+  // works, and the status bar is the only thing that needs it that often.
+  updateUI(true);
 }
 
 /**
@@ -701,7 +743,7 @@ async function pickAndKillSession(): Promise<void> {
   });
 }
 
-function updateUI(): void {
+function updateUI(throttleDashboard: boolean = false): void {
   const config = configManager.getConfig();
 
   const activeSession = pickPrimarySession(cachedData.activeSessions, cachedData.mostRecentSession);
@@ -715,9 +757,30 @@ function updateUI(): void {
     cachedData.promptCache
   );
 
-  if (dashboardPanel.isVisible) {
-    dashboardPanel.update(cachedData, config.sessionResetIntervalMinutes);
+  if (dashboardPanel.isOpen) renderDashboard(throttleDashboard);
+}
+
+/**
+ * Pushes cachedData to the dashboard, at most once per DASHBOARD_MIN_RENDER_INTERVAL_MS when
+ * throttled. A throttled render that lands inside the window is deferred, not dropped, so the
+ * panel always ends up showing the latest data.
+ */
+function renderDashboard(throttle: boolean): void {
+  const wait = lastDashboardRenderAt + DASHBOARD_MIN_RENDER_INTERVAL_MS - Date.now();
+  if (throttle && wait > 0) {
+    dashboardRenderTimer ??= setTimeout(() => {
+      dashboardRenderTimer = null;
+      renderDashboard(false);
+    }, wait);
+    return;
   }
+
+  if (dashboardRenderTimer) {
+    clearTimeout(dashboardRenderTimer);
+    dashboardRenderTimer = null;
+  }
+  lastDashboardRenderAt = Date.now();
+  dashboardPanel.update(cachedData, configManager.getConfig().sessionResetIntervalMinutes);
 }
 
 export function deactivate(): void {

@@ -131,6 +131,25 @@ describe('parseLoopEvents', () => {
     expect(events.wakeups).toEqual([]);
   });
 
+  it('finds a tool call that follows text in the same assistant record', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      timestamp: iso(0),
+      message: {
+        content: [
+          { type: 'text', text: 'Scheduling it now.' },
+          {
+            type: 'tool_use',
+            id: 'w1',
+            name: 'ScheduleWakeup',
+            input: { prompt: 'p', delaySeconds: 60 },
+          },
+        ],
+      },
+    });
+    expect(parseLoopEvents(line).wakeups).toHaveLength(1);
+  });
+
   it('counts a repeated tool_use id once', () => {
     const line = toolUse('w1', 'ScheduleWakeup', { prompt: 'p', delaySeconds: 60 }, 0);
     expect(parseLoopEvents([line, line].join('\n')).wakeups).toHaveLength(1);

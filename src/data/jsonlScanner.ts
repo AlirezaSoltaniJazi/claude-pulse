@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ModelTokenBreakdown, WeeklyUsageSummary } from '../types';
 import { getCurrentWeekBounds } from '../utils/dateUtils';
+import { forEachLine } from '../utils/jsonlLines';
 import { SCAN_CACHE_TTL_MS, SYNTHETIC_MODEL_ID } from '../constants';
 
 interface ScanCache {
@@ -9,7 +10,33 @@ interface ScanCache {
   timestamp: number;
 }
 
+/** One transcript's contribution to the week, and how far into the file it has been read. */
+interface FileCacheEntry {
+  mtimeMs: number;
+  size: number;
+  /** Byte offset just past the last complete line read. The next read resumes here. */
+  consumedUpTo: number;
+  /** The week this result counts. A new week invalidates it — older events no longer count. */
+  weekStartMs: number;
+  result: FileScanResult;
+}
+
 let scanCache: ScanCache | null = null;
+/**
+ * Per-transcript results, keyed by path.
+ *
+ * This is what keeps the scan cheap. Transcripts are append-only, so an unchanged
+ * (mtime, size) proves nothing new happened and a larger size means only the tail is new.
+ * Without it every scan re-read and re-parsed every transcript of the week — ~300 MB on a
+ * working machine, taking the extension host to ~650 MB at peak, once a minute. Pruned to
+ * the files the latest scan saw, so it never outgrows one week of transcripts.
+ */
+const fileCache = new Map<string, FileCacheEntry>();
+/**
+ * The scan in progress, shared by every caller that arrives while it runs. Session-file
+ * events come in bursts, and each one used to start its own full scan in parallel.
+ */
+let inFlightScan: Promise<WeeklyUsageSummary | null> | null = null;
 
 /**
  * Scans JSONL session files to compute accurate weekly usage stats.
@@ -22,7 +49,16 @@ export async function scanWeeklyUsage(
   if (!forceRefresh && scanCache && Date.now() - scanCache.timestamp < SCAN_CACHE_TTL_MS) {
     return scanCache.data;
   }
+  // A scan already running is at most a moment old — as fresh as a forced one would be.
+  if (inFlightScan) return inFlightScan;
 
+  inFlightScan = runScan(claudeHomePath).finally(() => {
+    inFlightScan = null;
+  });
+  return inFlightScan;
+}
+
+async function runScan(claudeHomePath: string): Promise<WeeklyUsageSummary | null> {
   try {
     const { weekStart, weekEnd, weekStartDate } = getCurrentWeekBounds();
     const projectsDir = path.join(claudeHomePath, 'projects');
@@ -44,6 +80,7 @@ export async function scanWeeklyUsage(
     const sessionIds = new Set<string>();
 
     const weekStartMs = weekStartDate.getTime();
+    const seen = new Set<string>();
 
     for (const dir of projectDirs) {
       if (!dir.isDirectory()) continue;
@@ -62,16 +99,18 @@ export async function scanWeeklyUsage(
         const filePath = path.join(dirPath, file.name);
 
         // Quick check: skip files not modified since week start
+        let stat: fs.Stats;
         try {
-          const stat = await fs.promises.stat(filePath);
+          stat = await fs.promises.stat(filePath);
           if (stat.mtimeMs < weekStartMs) continue;
         } catch (_e) {
           continue;
         }
+        seen.add(filePath);
 
         const sessionId = file.name.replace('.jsonl', '');
         try {
-          const result = await scanSingleFile(filePath, weekStartDate);
+          const result = await scanFileCached(filePath, stat, weekStartDate);
           if (result.messageCount > 0) {
             sessionIds.add(sessionId);
             totalMessages += result.messageCount;
@@ -96,6 +135,10 @@ export async function scanWeeklyUsage(
       }
     }
 
+    for (const cachedPath of fileCache.keys()) {
+      if (!seen.has(cachedPath)) fileCache.delete(cachedPath);
+    }
+
     const data: WeeklyUsageSummary = {
       weekStart,
       weekEnd,
@@ -116,8 +159,19 @@ export async function scanWeeklyUsage(
   }
 }
 
+/**
+ * Drops the weekly summary so the next call re-scans. The per-file cache is kept on purpose:
+ * it is keyed on each file's own (mtime, size), so it cannot serve stale data, and dropping it
+ * would turn every press of Refresh back into a full read of the week's transcripts.
+ */
 export function clearScanCache(): void {
   scanCache = null;
+}
+
+/** Also drops the per-file cache. For tests, and for a change of Claude home directory. */
+export function clearAllScanCaches(): void {
+  scanCache = null;
+  fileCache.clear();
 }
 
 interface FileScanResult {
@@ -151,18 +205,73 @@ function addBreakdown(
   };
 }
 
-async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<FileScanResult> {
-  const content = await fs.promises.readFile(filePath, 'utf-8');
-  const lines = content.split('\n');
+/**
+ * One file's result, read as little of the file as its (mtime, size) allows.
+ *
+ *  - unchanged      → the cached result, no read at all;
+ *  - grown          → the cached result plus only the appended bytes;
+ *  - anything else  → a full streamed read (first sight, a rewrite, or a new week).
+ */
+async function scanFileCached(
+  filePath: string,
+  stat: fs.Stats,
+  weekStartDate: Date
+): Promise<FileScanResult> {
+  const weekStartMs = weekStartDate.getTime();
+  const cached = fileCache.get(filePath);
+  const sameWeek = cached !== undefined && cached.weekStartMs === weekStartMs;
 
-  let messageCount = 0;
-  let toolCallCount = 0;
+  if (sameWeek && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    return cached.result;
+  }
+
+  const isAppend = sameWeek && stat.size > cached.size;
+  const result = isAppend ? cloneResult(cached.result) : emptyResult();
+  const consumedUpTo = await scanLines(
+    filePath,
+    isAppend ? cached.consumedUpTo : 0,
+    weekStartDate,
+    result
+  );
+
+  fileCache.set(filePath, {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    consumedUpTo,
+    weekStartMs,
+    result,
+  });
+  return result;
+}
+
+function emptyResult(): FileScanResult {
+  return { messageCount: 0, toolCallCount: 0, modelBreakdown: {}, hourCounts: {} };
+}
+
+/** Deep enough that adding to the copy never mutates a result another scan returned. */
+function cloneResult(result: FileScanResult): FileScanResult {
   const modelBreakdown: Record<string, ModelTokenBreakdown> = {};
-  const hourCounts: Record<string, number> = {};
+  for (const [model, breakdown] of Object.entries(result.modelBreakdown)) {
+    modelBreakdown[model] = { ...breakdown };
+  }
+  return {
+    messageCount: result.messageCount,
+    toolCallCount: result.toolCallCount,
+    modelBreakdown,
+    hourCounts: { ...result.hourCounts },
+  };
+}
 
-  for (const line of lines) {
-    if (!line) continue;
+/** Streams lines from `start`, adding this week's events into `into`. Returns the resume offset. */
+async function scanLines(
+  filePath: string,
+  start: number,
+  weekStartDate: Date,
+  into: FileScanResult
+): Promise<number> {
+  const { modelBreakdown, hourCounts } = into;
 
+  return forEachLine(filePath, start, (line) => {
     try {
       const event = JSON.parse(line);
 
@@ -170,13 +279,13 @@ async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<Fi
       let eventDate: Date | null = null;
       if (event.timestamp) {
         eventDate = new Date(event.timestamp);
-        if (eventDate < weekStartDate) continue;
+        if (eventDate < weekStartDate) return;
         if (Number.isNaN(eventDate.getTime())) eventDate = null;
       }
 
       if (event.type === 'assistant' && event.message) {
         const msg = event.message;
-        messageCount++;
+        into.messageCount++;
 
         // Local hour, not UTC: the histogram answers 'when do I work', a question about the
         // wall clock in front of the user.
@@ -208,19 +317,17 @@ async function scanSingleFile(filePath: string, weekStartDate: Date): Promise<Fi
         if (msg.content && Array.isArray(msg.content)) {
           for (const block of msg.content) {
             if (block.type === 'tool_use') {
-              toolCallCount++;
+              into.toolCallCount++;
             }
           }
         }
       }
 
       if (event.type === 'user') {
-        messageCount++;
+        into.messageCount++;
       }
     } catch (_e) {
       // Skip malformed JSONL lines
     }
-  }
-
-  return { messageCount, toolCallCount, modelBreakdown, hourCounts };
+  });
 }

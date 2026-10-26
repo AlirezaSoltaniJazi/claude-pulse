@@ -91,6 +91,45 @@ describe('TaskCompletionDetector', () => {
     expect(completedEvents[0].sessionId).toBe('sess-1');
   });
 
+  it('still notices growth after the transcript is rewritten shorter', () => {
+    const endTurnLine = makeEndTurnEvent('2026-03-30T12:00:00Z') + '\n';
+    mockedFs.statSync = vi.fn().mockReturnValue({ size: 10_000 });
+    detector = new TaskCompletionDetector(1);
+    const completedEvents: unknown[] = [];
+    detector.onTaskCompleted((e) => completedEvents.push(e));
+    detector.updateSessions(
+      [{ pid: 123, sessionId: 'sess-1', cwd: '/p', startedAt: Date.now() }],
+      '/home/user/.claude'
+    );
+
+    // Rewritten down to nothing, then a turn ends — well below the old 10,000-byte mark.
+    mockedFs.statSync = vi.fn().mockReturnValue({ size: 0 });
+    vi.advanceTimersByTime(2100);
+    mockedFs.statSync = vi.fn().mockReturnValue({ size: endTurnLine.length });
+    mockedFs.readSync = vi.fn().mockImplementation((_fd, buffer: Buffer) => {
+      buffer.write(endTurnLine);
+      return endTurnLine.length;
+    });
+    vi.advanceTimersByTime(2100 + 1100);
+
+    expect(completedEvents).toHaveLength(1);
+  });
+
+  it('closes the file even when the read fails', () => {
+    detector = new TaskCompletionDetector(1);
+    detector.updateSessions(
+      [{ pid: 123, sessionId: 'sess-1', cwd: '/p', startedAt: Date.now() }],
+      '/home/user/.claude'
+    );
+    mockedFs.statSync = vi.fn().mockReturnValue({ size: 100 });
+    mockedFs.readSync = vi.fn().mockImplementation(() => {
+      throw new Error('EIO');
+    });
+
+    vi.advanceTimersByTime(2100);
+    expect(mockedFs.closeSync).toHaveBeenCalledWith(42);
+  });
+
   it('reports the cwd from the session file, not the project directory name', () => {
     // The project directory encoding replaces both '/' and '.' with '-', so it cannot be
     // inverted: decoding '-Users-me-projects-claude-pulse' yields '/Users/me/projects/claude/pulse'

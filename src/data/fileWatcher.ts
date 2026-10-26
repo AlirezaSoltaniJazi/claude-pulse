@@ -1,9 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { MODEL_WATCH_DEBOUNCE_MS, WATCH_POLL_INTERVAL_MS } from '../constants';
+import {
+  MODEL_WATCH_DEBOUNCE_MS,
+  SESSIONS_WATCH_DEBOUNCE_MS,
+  WATCH_POLL_INTERVAL_MS,
+} from '../constants';
 
-type DebounceSlot = 'settingsDebounce' | 'transcriptDebounce';
+type DebounceSlot = 'settingsDebounce' | 'transcriptDebounce' | 'sessionsDebounce';
 
 export class FileWatcher implements vscode.Disposable {
   private readonly _onStatsChanged = new vscode.EventEmitter<void>();
@@ -25,6 +29,7 @@ export class FileWatcher implements vscode.Disposable {
 
   private settingsDebounce: ReturnType<typeof setTimeout> | null = null;
   private transcriptDebounce: ReturnType<typeof setTimeout> | null = null;
+  private sessionsDebounce: ReturnType<typeof setTimeout> | null = null;
 
   private lastStatsModified: number = 0;
   private lastSettingsModified: number = 0;
@@ -85,6 +90,7 @@ export class FileWatcher implements vscode.Disposable {
     this.lastStatsModified = 0;
     this.lastSettingsModified = 0;
     this.clearDebounce('settingsDebounce');
+    this.clearDebounce('sessionsDebounce');
 
     this.start();
   }
@@ -141,8 +147,10 @@ export class FileWatcher implements vscode.Disposable {
     const sessionsDir = path.join(this.claudeHomePath, 'sessions');
 
     try {
+      // Debounced: one session file write arrives as a burst of change/rename events, and
+      // each event used to start a full refresh of its own.
       this.sessionWatcher = fs.watch(sessionsDir, (_eventType, _filename) => {
-        this._onSessionsChanged.fire();
+        this.schedule('sessionsDebounce', this._onSessionsChanged, SESSIONS_WATCH_DEBOUNCE_MS);
       });
     } catch (_e) {
       // Sessions directory might not exist yet — will retry on next poll
@@ -235,12 +243,16 @@ export class FileWatcher implements vscode.Disposable {
   }
 
   /** Independent timers per slot, so transcript chatter never delays a settings change. */
-  private schedule(slot: DebounceSlot, emitter: vscode.EventEmitter<void>): void {
+  private schedule(
+    slot: DebounceSlot,
+    emitter: vscode.EventEmitter<void>,
+    delayMs: number = MODEL_WATCH_DEBOUNCE_MS
+  ): void {
     this.clearDebounce(slot);
     this[slot] = setTimeout(() => {
       this[slot] = null;
       emitter.fire();
-    }, MODEL_WATCH_DEBOUNCE_MS);
+    }, delayMs);
   }
 
   private clearDebounce(slot: DebounceSlot): void {
@@ -266,6 +278,7 @@ export class FileWatcher implements vscode.Disposable {
     // Cleared BEFORE the emitters go, so a pending timer can never fire into a disposed one.
     this.clearDebounce('settingsDebounce');
     this.clearDebounce('transcriptDebounce');
+    this.clearDebounce('sessionsDebounce');
 
     this._onStatsChanged.dispose();
     this._onSessionsChanged.dispose();

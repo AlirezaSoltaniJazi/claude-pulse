@@ -145,6 +145,8 @@ describe('DashboardPanel — loop scan', () => {
       reveal: vi.fn(),
       dispose: vi.fn(),
       onDidDispose: vi.fn(),
+      onDidChangeViewState: vi.fn(),
+      visible: true,
     } as never);
 
     const panel = new DashboardPanel();

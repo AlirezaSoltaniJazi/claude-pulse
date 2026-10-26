@@ -85,6 +85,16 @@ export const MODEL_WATCH_DEBOUNCE_MS = 250;
  * be dropped outright on network and cloud-synced home directories.
  */
 export const WATCH_POLL_INTERVAL_MS = 2_000;
+/**
+ * Coalesces events from the sessions directory. A single session-file write arrives as several
+ * change/rename events, and each one triggers a full refresh, so they are collapsed into one.
+ */
+export const SESSIONS_WATCH_DEBOUNCE_MS = 500;
+/**
+ * Floor between dashboard re-renders driven by transcript appends. Every render replaces the
+ * webview's whole document, and appends land every couple of seconds while Claude works.
+ */
+export const DASHBOARD_MIN_RENDER_INTERVAL_MS = 5_000;
 
 // Session Monitor
 export const LIVENESS_CHECK_INTERVAL_MS = 10_000;
@@ -102,6 +112,11 @@ export const DEFAULT_TASK_IDLE_SECONDS = 10;
 export const MIN_TASK_IDLE_SECONDS = 5;
 export const TASK_NOTIFICATION_COOLDOWN_MS = 30_000;
 export const TASK_DETECTOR_POLL_MS = 2_000;
+/**
+ * Most bytes read per poll when looking for an end_turn. Only the last records matter, and the
+ * largest single transcript line measured locally is ~846 KB, so 1 MB always covers them.
+ */
+export const TASK_DETECTOR_MAX_READ_BYTES = 1024 * 1024;
 
 // Config Defaults
 export const DEFAULT_POLLING_INTERVAL_SEC = 30;
