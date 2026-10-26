@@ -74,11 +74,13 @@ export async function readLoops(
   sessions: SessionFile[],
   now: number = Date.now()
 ): Promise<LoopScan> {
+  const scannedPaths = new Set<string>();
   const results = await Promise.all(
     sessions.map(async (session): Promise<SessionLoops | null> => {
       try {
         const transcriptPath = await resolveTranscriptPath(claudeHomePath, session);
         if (!transcriptPath) return null;
+        scannedPaths.add(transcriptPath);
 
         const events = await readTranscriptLoopEvents(transcriptPath);
         if (!events) return null;
@@ -103,6 +105,11 @@ export async function readLoops(
       }
     })
   );
+
+  // Sessions come and go; an entry for one that is no longer listed would never be read again.
+  for (const cachedPath of loopEventsCache.keys()) {
+    if (!scannedPaths.has(cachedPath)) loopEventsCache.delete(cachedPath);
+  }
 
   const withLoops = results.filter((s): s is SessionLoops => s !== null);
   withLoops.sort((a, b) => {
@@ -280,6 +287,13 @@ export function parseLoopEvents(content: string): TranscriptLoopEvents {
       }
     }
   }
+
+  // Only a prompt that could be a run of one of this transcript's own jobs is kept. The rest —
+  // every message the user ever typed in the session — would otherwise sit in the cache for as
+  // long as the window lives, and a transcript with no loops would keep all of them for nothing.
+  events.userPrompts = events.userPrompts.filter((p) =>
+    events.creates.some((create) => isRunOf(p.text, create.prompt))
+  );
 
   return events;
 }

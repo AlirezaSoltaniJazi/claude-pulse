@@ -148,11 +148,21 @@ describe('parseLoopEvents', () => {
     expect(events.deletes.get('j1')).toBe(T0 + 5 * MIN);
   });
 
-  it('keeps typed prompts but not tool results as user prompts', () => {
+  it('keeps only typed prompts that could be a run of one of its loops', () => {
     const events = parseLoopEvents(
-      [userPrompt('check CI', MIN), toolResult('tx', 'check CI', undefined, 2 * MIN)].join('\n')
+      [
+        ...cronCreate('t1', 'j1', '*/5 * * * *', 'check CI', 0),
+        userPrompt('check CI', MIN),
+        userPrompt('unrelated chat', 2 * MIN),
+        toolResult('tx', 'check CI', undefined, 3 * MIN),
+      ].join('\n')
     );
     expect(events.userPrompts).toEqual([{ text: 'check CI', at: T0 + MIN }]);
+  });
+
+  it('keeps no prompts at all for a transcript without loops', () => {
+    const events = parseLoopEvents([userPrompt('hello', 0), userPrompt('again', MIN)].join('\n'));
+    expect(events.userPrompts).toEqual([]);
   });
 });
 
