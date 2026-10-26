@@ -68,7 +68,11 @@ export class DashboardPanel implements vscode.Disposable {
         vscode.ViewColumn.One,
         {
           enableScripts: true,
-          retainContextWhenHidden: true,
+          // Not retained when hidden: keeping the context alive holds a whole renderer in
+          // memory for a tab nobody is looking at. Nothing is lost by letting it go — every
+          // update rewrites the document from scratch anyway, the tab and expansion state live
+          // in viewState on this side, and updates skipped while hidden are caught up by
+          // onDidBecomeVisible.
           // The dashboard is self-contained HTML; it never needs to load a local file.
           localResourceRoots: [],
         }

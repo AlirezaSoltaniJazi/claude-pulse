@@ -4,6 +4,7 @@ import { resolveTranscriptPath } from './modelReader';
 import { isProcessAlive } from './sessionReader';
 import { sessionLabel } from './agentReader';
 import { nextCronRun } from '../utils/cron';
+import { forEachLine } from '../utils/jsonlLines';
 import { LOOP_FIRE_GRACE_MS, LOOP_RECURRING_EXPIRY_MS } from '../constants';
 
 /** A CronCreate call whose result named a job id. Calls that failed never get one. */
@@ -147,14 +148,14 @@ async function readTranscriptLoopEvents(filePath: string): Promise<TranscriptLoo
     return cached.events;
   }
 
-  let content: string;
+  const parser = createLoopEventParser();
   try {
-    content = await fs.promises.readFile(filePath, 'utf-8');
+    await forEachLine(filePath, 0, parser.push, { includeUnterminated: true });
   } catch (_e) {
     return null;
   }
 
-  const events = parseLoopEvents(content);
+  const events = parser.finish();
   loopEventsCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, events });
   return events;
 }
@@ -179,9 +180,10 @@ interface ContentBlock {
 }
 
 /**
- * Pulls loop events out of a transcript's raw text.
+ * Pulls loop events out of a transcript, one line at a time.
  *
- * Exported and pure so the record shapes can be tested without a filesystem. The shapes are
+ * Line-at-a-time so the reader can stream a transcript instead of loading it whole — a single
+ * session's transcript can run to ~100 MB. Exported and pure so the record shapes can be tested without a filesystem. The shapes are
  * the ones Claude Code writes today:
  *
  *  - assistant `tool_use` CronCreate `{cron, prompt, recurring}`, answered by a user
@@ -193,7 +195,10 @@ interface ContentBlock {
  * `api-request-blob` records that repeat the same tool_use blocks, and counting those would
  * double every loop. Malformed lines are skipped.
  */
-export function parseLoopEvents(content: string): TranscriptLoopEvents {
+export function createLoopEventParser(): {
+  push: (line: string) => void;
+  finish: () => TranscriptLoopEvents;
+} {
   const events: TranscriptLoopEvents = {
     creates: [],
     deletes: new Map(),
@@ -206,17 +211,17 @@ export function parseLoopEvents(content: string): TranscriptLoopEvents {
   >();
   const seenToolUses = new Set<string>();
 
-  for (const line of content.split('\n')) {
-    if (!line || !RELEVANT_LINE.test(line)) continue;
+  const push = (line: string): void => {
+    if (!line || !RELEVANT_LINE.test(line)) return;
 
     let record: TranscriptRecord;
     try {
       record = JSON.parse(line) as TranscriptRecord;
     } catch (_e) {
-      continue;
+      return;
     }
-    if (record.isSidechain === true) continue;
-    if (record.type !== 'user' && record.type !== 'assistant') continue;
+    if (record.isSidechain === true) return;
+    if (record.type !== 'user' && record.type !== 'assistant') return;
 
     const at = parseTimestamp(record.timestamp);
     const body = record.message?.content;
@@ -226,7 +231,7 @@ export function parseLoopEvents(content: string): TranscriptLoopEvents {
       if (text !== null && text.length <= MAX_PROMPT_COMPARE_LENGTH) {
         events.userPrompts.push({ text, at });
       }
-      if (!Array.isArray(body)) continue;
+      if (!Array.isArray(body)) return;
 
       for (const block of body as ContentBlock[]) {
         if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
@@ -248,10 +253,10 @@ export function parseLoopEvents(content: string): TranscriptLoopEvents {
           firstFireAt: typeof result?.nextFireAt === 'number' ? result.nextFireAt : null,
         });
       }
-      continue;
+      return;
     }
 
-    if (!Array.isArray(body)) continue;
+    if (!Array.isArray(body)) return;
     for (const block of body as ContentBlock[]) {
       if (block?.type !== 'tool_use' || typeof block.id !== 'string') continue;
       if (seenToolUses.has(block.id)) continue;
@@ -286,16 +291,27 @@ export function parseLoopEvents(content: string): TranscriptLoopEvents {
         });
       }
     }
-  }
+  };
 
-  // Only a prompt that could be a run of one of this transcript's own jobs is kept. The rest —
-  // every message the user ever typed in the session — would otherwise sit in the cache for as
-  // long as the window lives, and a transcript with no loops would keep all of them for nothing.
-  events.userPrompts = events.userPrompts.filter((p) =>
-    events.creates.some((create) => isRunOf(p.text, create.prompt))
-  );
+  const finish = (): TranscriptLoopEvents => {
+    // Only a prompt that could be a run of one of this transcript's own jobs is kept. The rest —
+    // every message the user ever typed in the session — would otherwise sit in the cache for as
+    // long as the window lives, and a transcript with no loops would keep all of them for nothing.
+    events.userPrompts = events.userPrompts.filter((p) =>
+      events.creates.some((create) => isRunOf(p.text, create.prompt))
+    );
 
-  return events;
+    return events;
+  };
+
+  return { push, finish };
+}
+
+/** Whole-text convenience over createLoopEventParser(), for tests and small inputs. */
+export function parseLoopEvents(content: string): TranscriptLoopEvents {
+  const parser = createLoopEventParser();
+  for (const line of content.split('\n')) parser.push(line);
+  return parser.finish();
 }
 
 /**

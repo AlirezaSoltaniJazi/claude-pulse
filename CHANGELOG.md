@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transcripts while hidden, and catches up when shown. While visible, rebuilds caused by Claude writing to its
   transcript happen at most every 5 seconds.
 - The status bar only updates when its text actually changes, instead of every second.
+- **Show loops streams transcripts** instead of loading each one whole, so scanning a long session no longer
+  spikes memory by several times the transcript's size.
+- **A hidden dashboard releases its page.** It no longer keeps its webview alive in the background; it is
+  rebuilt when shown, which every update did anyway.
 
 ### Fixed
 
