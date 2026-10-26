@@ -9,19 +9,30 @@ import {
   ClaudePulseData,
   ClaudeUsage,
   DailyActivity,
+  LoopInfo,
+  LoopScan,
+  LoopStatus,
   ModelUsage,
   PromptCacheInfo,
   SessionFile,
+  SessionLoops,
   SessionNode,
   WeeklyUsageSummary,
 } from '../types';
-import { formatDurationShort, formatModelName, formatNumber } from '../utils/formatting';
+import {
+  formatDurationDays,
+  formatDurationShort,
+  formatModelName,
+  formatNumber,
+} from '../utils/formatting';
+import { describeCron } from '../utils/cron';
 import { limitLabel, resolveLimits } from '../utils/usageLimits';
 import { groupAgentsByType } from '../utils/agentGrouping';
 import {
   AGENT_GRAPH_CHIP_TYPES,
   AGENT_GRAPH_MAX_NODES_PER_LEVEL,
   AGENT_GRAPH_NODES_PER_LEVEL,
+  LOOP_AUTONOMOUS_SENTINEL,
   USAGE_TIER_LOW,
   USAGE_TIER_MEDIUM,
   USAGE_TIER_HIGH,
@@ -802,6 +813,68 @@ export function generateDashboardHtml(
       background: var(--node-agent-bg);
       border-color: var(--node-agent-border);
     }
+
+    .loops-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .loops-toolbar .refresh-btn { margin-left: auto; }
+    .loops-toolbar .refresh-btn:disabled { opacity: 0.5; cursor: default; }
+
+    .loop-session {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .loop-session-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .loop-session-dead { opacity: 0.6; }
+
+    .loop-prompt {
+      text-align: left;
+      max-width: 380px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .loop-sub {
+      font-size: 0.82em;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .loop-table td:first-child { max-width: 380px; }
+    .loop-table td { vertical-align: top; }
+
+    .loop-status {
+      display: inline-block;
+      font-size: 0.78em;
+      border-radius: 8px;
+      padding: 0 7px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .loop-actions {
+      display: flex;
+      gap: 4px;
+      justify-content: flex-end;
+      white-space: nowrap;
+    }
+
+    .loop-status-active { color: var(--success); border-color: var(--success); }
+    .loop-status-cancelled { color: var(--warning); border-color: var(--warning); }
   </style>
 </head>
 <body>
@@ -834,6 +907,16 @@ export function generateDashboardHtml(
       // fire; the header controls dispatch from here like everything else.
       if (target.closest('button[data-refresh]')) {
         refreshData();
+        return;
+      }
+      // Disabled until the host re-renders with the result, so a slow scan over large
+      // transcripts cannot be queued twice.
+      const scanBtn = target.closest('button[data-scan-loops]');
+      if (scanBtn) {
+        if (scanBtn.disabled) return;
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'Scanning...';
+        vscode.postMessage({ command: 'scanLoops' });
         return;
       }
       const sectionHeader = target.closest('[data-section]');
@@ -925,6 +1008,17 @@ export function generateDashboardHtml(
         vscode.postMessage(
           Object.assign({ command: 'killAgent', agentDescription: btn.dataset.agent || '' }, payload)
         );
+      } else if (btn.dataset.action === 'loop-run' || btn.dataset.action === 'loop-cancel') {
+        vscode.postMessage(
+          Object.assign(
+            {
+              command: 'loopAction',
+              action: btn.dataset.action === 'loop-run' ? 'run' : 'cancel',
+              loopId: btn.dataset.loop || '',
+            },
+            payload
+          )
+        );
       } else {
         return;
       }
@@ -978,6 +1072,8 @@ export function generateDashboardHtml(
       </div>
     </div>
   </div>
+
+  ${renderLoopsSection(data.loops)}
 
   <div class="section">
     <div class="section-header" data-section="sessions">
@@ -2037,6 +2133,194 @@ function renderAgentsSection(agents: AgentMap | null): string {
       </div>
     </div>
   </div>`;
+}
+
+/**
+ * Every `/loop` the user's sessions have scheduled, grouped by session.
+ *
+ * Unlike every other section this one is never filled by the poll: loops are found by reading
+ * each session's whole transcript, so the section starts as a single button and only scans
+ * when it is pressed. The result then stays on screen across polls until the next press, and
+ * the header says when it was taken so a stale list never passes for a live one.
+ */
+function renderLoopsSection(loops: LoopScan | null): string {
+  const scanned = loops !== null;
+  const badge =
+    scanned && loops.activeCount > 0
+      ? ` <span class="session-count-badge">${loops.activeCount}</span>`
+      : '';
+
+  let summary: string;
+  let body = '';
+  if (!scanned) {
+    summary = 'Loops are read from session transcripts on demand.';
+  } else {
+    const at = format24hTime(new Date(loops.generatedAt));
+    summary =
+      loops.totalCount === 0
+        ? `No loops found &middot; scanned ${at}`
+        : `${loops.activeCount} active of ${loops.totalCount} &middot; ${loops.sessions.length} ${
+            loops.sessions.length === 1 ? 'session' : 'sessions'
+          } &middot; scanned ${at}`;
+    body =
+      loops.totalCount === 0
+        ? '<p class="no-data">No session has scheduled a loop. Start one in Claude Code with /loop 5m &lt;prompt&gt;.</p>'
+        : loops.sessions.map(renderLoopSession).join('');
+  }
+
+  return `<div class="section">
+    <div class="section-header" data-section="loops">
+      <span class="section-toggle" id="toggle-loops">&#9660;</span>
+      <h2>Loops${badge}</h2>
+    </div>
+    <div class="section-content" id="content-loops">
+      <div class="grid">
+        <div class="card full-width">
+          <div class="loops-toolbar">
+            <span class="panel-summary">${summary}</span>
+            <button class="refresh-btn" data-scan-loops>${scanned ? 'Refresh loops' : 'Show loops'}</button>
+          </div>
+          ${body}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderLoopSession(session: SessionLoops): string {
+  const active = session.loops.filter((l) => l.status === 'active').length;
+  const rows = session.loops.map((loop) => renderLoopRow(loop, session)).join('');
+
+  return `<div class="loop-session${session.isAlive ? '' : ' loop-session-dead'}">
+    <div class="loop-session-head">
+      <span class="stat-value">${escapeHtml(session.label)}</span>
+      <span class="loop-status ${session.isAlive ? 'loop-status-active' : ''}">${session.isAlive ? 'live' : 'exited'}</span>
+      <span class="loop-sub">PID ${escapeHtml(String(session.pid))}<i class="dot-sep">&middot;</i>${escapeHtml(session.sessionId.slice(0, 8))}<i class="dot-sep">&middot;</i>${active} active</span>
+    </div>
+    <div class="node-path" title="${escapeHtml(session.cwd)}">${escapeHtml(session.cwd)}</div>
+    <table class="loop-table">
+      <thead>
+        <tr>
+          <th>Loop</th>
+          <th>Schedule</th>
+          <th>Status</th>
+          <th>Runs</th>
+          <th>Last run</th>
+          <th>Next run</th>
+          <th>Expires</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderLoopRow(loop: LoopInfo, session: SessionLoops): string {
+  const now = Date.now();
+  const prompt =
+    loop.prompt === LOOP_AUTONOMOUS_SENTINEL ? 'Autonomous loop (no task prompt)' : loop.prompt;
+
+  let schedule: string;
+  if (loop.kind === 'dynamic') {
+    schedule =
+      loop.delaySeconds !== null
+        ? `self-paced, last ${formatDurationShort(loop.delaySeconds * 1000)}`
+        : 'self-paced';
+  } else {
+    schedule = loop.recurring ? describeCron(loop.cron ?? '') : 'once';
+  }
+
+  const kind = loop.kind === 'dynamic' ? 'dynamic' : loop.recurring ? 'cron' : 'one-shot';
+  const sub = [
+    escapeHtml(kind),
+    loop.kind === 'cron' ? `id ${escapeHtml(loop.id)}` : '',
+    `created ${formatAgo(loop.createdAt, now)}`,
+    loop.reason ? escapeHtml(loop.reason) : '',
+  ]
+    .filter(Boolean)
+    .join('<i class="dot-sep">&middot;</i>');
+
+  // A recurring cron job is jittered by up to half its period, so its next run is marked as
+  // approximate the same way the estimated reset timer is.
+  const isApprox = loop.kind === 'cron' && loop.recurring;
+  const next =
+    loop.nextRunAt === null
+      ? '&mdash;'
+      : loop.nextRunAt <= now
+        ? 'due'
+        : `${isApprox ? '~' : ''}${formatIn(loop.nextRunAt, now)}`;
+
+  // A countdown only means something while the job still exists: a cancelled or ended loop
+  // is gone already, and showing "6d 23h" beside it reads as if it were still scheduled.
+  const expires =
+    loop.status === 'expired'
+      ? 'expired'
+      : loop.expiresAt === null || loop.status !== 'active'
+        ? '&mdash;'
+        : formatDurationDays(Math.max(0, loop.expiresAt - now));
+
+  return `<tr>
+    <td>
+      <div class="loop-prompt" title="${escapeHtml(prompt)}">${escapeHtml(prompt)}</div>
+      <div class="loop-sub">${sub}</div>
+    </td>
+    <td title="${escapeHtml(loop.cron ?? '')}">${escapeHtml(schedule)}</td>
+    <td><span class="loop-status loop-status-${loop.status}" title="${escapeHtml(loopStatusTitle(loop.status))}">${loop.status}</span></td>
+    <td>${loop.runCount}</td>
+    <td>${loop.lastRunAt > 0 ? formatAgo(loop.lastRunAt, now) : '&mdash;'}</td>
+    <td>${next}</td>
+    <td>${expires}</td>
+    <td>${renderLoopActions(loop, session)}</td>
+  </tr>`;
+}
+
+/**
+ * Run-now and Cancel, for a loop there is still something to do about.
+ *
+ * Payload in data-* attributes and dispatched by the one delegated listener, like the kill
+ * buttons, and for the same reason: the label is session-derived text. Only ids travel —
+ * the extension looks the loop up in its own last scan, so the text it types into a session
+ * never comes from the webview.
+ */
+function renderLoopActions(loop: LoopInfo, session: SessionLoops): string {
+  if (loop.status !== 'active' || !session.isAlive) return '';
+
+  const data = `data-session="${escapeHtml(session.sessionId)}" data-pid="${escapeHtml(
+    String(session.pid)
+  )}" data-label="${escapeHtml(session.label)}" data-loop="${escapeHtml(loop.id)}"`;
+
+  return `<div class="loop-actions">
+      <button class="node-btn" data-action="loop-run" ${data} title="Run this loop's prompt now, ahead of its schedule. The schedule is unchanged.">Run now</button>
+      <button class="node-btn node-btn-danger" data-action="loop-cancel" ${data} title="Ask the session to cancel this loop">Cancel</button>
+    </div>`;
+}
+
+function formatAgo(at: number, now: number): string {
+  const elapsed = now - at;
+  return elapsed < 60_000 ? 'just now' : `${formatDurationDays(elapsed)} ago`;
+}
+
+function formatIn(at: number, now: number): string {
+  const date = new Date(at);
+  const sameDay = date.toDateString() === new Date(now).toDateString();
+  const clock = sameDay ? format24hTime(date) : `${formatShortDate(date)} ${format24hTime(date)}`;
+  return `${formatDurationDays(at - now)} (${clock})`;
+}
+
+function loopStatusTitle(status: LoopStatus): string {
+  switch (status) {
+    case 'active':
+      return 'Scheduled, and its session is alive';
+    case 'cancelled':
+      return 'Cancelled with CronDelete, or stopped by the loop itself';
+    case 'completed':
+      return 'One-shot that has fired, or a self-paced loop that stopped rescheduling';
+    case 'expired':
+      return 'Recurring job past Claude Code’s 7-day limit';
+    case 'ended':
+      return 'Its session exited; loops live only in session memory';
+  }
 }
 
 /** Same story as the breakdown card: the hour histogram now comes from the weekly scan. */

@@ -33,6 +33,8 @@ src/
 │   ├── usageApi.ts           # Anthropic OAuth API client (retry, cache, credentials)
 │   ├── fileWatcher.ts        # Hybrid: FSWatch + polling for ~/.claude/ changes
 │   ├── jsonlScanner.ts       # Scans JSONL session logs for weekly token counts
+│   ├── loopControl.ts        # Run-now / Cancel: builds the text typed into a session's terminal, finds that terminal by PID ancestry
+│   ├── loopReader.ts         # Reconstructs /loop jobs from CronCreate/CronDelete/ScheduleWakeup calls in transcripts (manual scan)
 │   ├── taskCompletionDetector.ts # Idle-timeout detection for task-complete notifications
 │   └── dataAggregator.ts     # Aggregates daily activity from StatsCache
 ├── notifications/
@@ -43,6 +45,7 @@ src/
 │   ├── webviewPanel.ts       # Webview lifecycle and message routing
 │   └── webviewContent.ts     # Dashboard HTML/CSS/JS generation (inline)
 └── utils/
+    ├── cron.ts               # parseCron, nextCronRun, describeCron (5-field, numeric)
     ├── formatting.ts         # formatNumber, formatDuration
     └── dateUtils.ts          # getCurrentWeekBounds, formatDate
 test/

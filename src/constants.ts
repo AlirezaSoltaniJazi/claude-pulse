@@ -216,3 +216,24 @@ export const AGENT_GRAPH_MAX_NODES_PER_LEVEL = 40;
  * summarising and start being the list they were meant to replace.
  */
 export const AGENT_GRAPH_CHIP_TYPES = 3;
+
+// Loops
+/**
+ * Claude Code expires a recurring CronCreate job seven days after it was scheduled: it fires
+ * one last time, then is deleted. Mirrored here because nothing on disk records the expiry.
+ */
+export const LOOP_RECURRING_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Slack allowed past a scheduled fire time before the loop is treated as having moved on.
+ *
+ * Jobs only fire while the REPL is idle, so a busy session runs them late; and a dynamic loop
+ * whose wake-up passed this long ago without a new ScheduleWakeup has stopped rescheduling.
+ */
+export const LOOP_FIRE_GRACE_MS = 10 * 60 * 1000;
+/** Sentinel prompt Claude Code passes for an autonomous `/loop` with no task of its own. */
+export const LOOP_AUTONOMOUS_SENTINEL = '<<autonomous-loop-dynamic>>';
+/**
+ * Parent hops walked from a session's PID looking for the VS Code terminal that owns it.
+ * Claude is normally the shell's direct child; the slack covers wrappers such as `npx` or `env`.
+ */
+export const LOOP_MAX_PROCESS_ANCESTRY = 6;
