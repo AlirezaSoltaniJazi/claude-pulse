@@ -251,7 +251,7 @@ async function readSessionNode(
 }
 
 /** The session's own name when Claude Code derived one, else the basename of its cwd. */
-function sessionLabel(session: SessionFile): string {
+export function sessionLabel(session: SessionFile): string {
   const name = asString(session.name);
   if (name) return name;
   const cwd = asString(session.cwd);

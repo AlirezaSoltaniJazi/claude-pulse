@@ -316,6 +316,82 @@ export interface AgentGraph {
   truncated: boolean;
 }
 
+/**
+ * How a loop was scheduled.
+ *
+ *  - 'cron'    — `/loop 5m ...` or a direct CronCreate: a fixed cron schedule.
+ *  - 'dynamic' — `/loop` with no interval: the model picks each delay via ScheduleWakeup.
+ */
+export type LoopKind = 'cron' | 'dynamic';
+
+/**
+ * A loop's lifecycle state, as far as the transcript can prove it.
+ *
+ * Loop jobs live only in the Claude process's memory — nothing is written to disk — so every
+ * value here is inferred from the tool calls that created and cancelled them.
+ *
+ *  - 'active'    — its session is alive and nothing has ended it.
+ *  - 'cancelled' — CronDelete named it, or a dynamic loop scheduled with `stop`.
+ *  - 'completed' — a one-shot job whose time has passed, or a dynamic loop that stopped
+ *                  rescheduling itself.
+ *  - 'expired'   — a recurring job past Claude Code's seven-day limit.
+ *  - 'ended'     — the session that held it exited, which takes every job with it.
+ */
+export type LoopStatus = 'active' | 'cancelled' | 'completed' | 'expired' | 'ended';
+
+/** One loop scheduled inside a session. */
+export interface LoopInfo {
+  /** CronCreate's job id, e.g. 'd90aeba3'. For a dynamic loop, the first ScheduleWakeup's tool id. */
+  id: string;
+  kind: LoopKind;
+  /** The prompt each run enqueues. */
+  prompt: string;
+  /** 5-field cron expression. Null for a dynamic loop. */
+  cron: string | null;
+  /** False only for a one-shot cron job. */
+  recurring: boolean;
+  /** Most recent delay a dynamic loop asked for, in seconds. Null for a cron job. */
+  delaySeconds: number | null;
+  /** Most recent reason a dynamic loop gave for its delay. */
+  reason: string | null;
+  /** Epoch ms the loop was scheduled. */
+  createdAt: number;
+  /**
+   * Cron: runs observed in the transcript. Dynamic: wake-ups scheduled. Both are counted off
+   * the transcript, so a run the session never recorded is not counted.
+   */
+  runCount: number;
+  /** Epoch ms of the newest observed run, or 0 when none. */
+  lastRunAt: number;
+  /** Epoch ms of the next expected run, or null when there is none to expect. */
+  nextRunAt: number | null;
+  /** Epoch ms a recurring cron job auto-expires, or null when it does not. */
+  expiresAt: number | null;
+  status: LoopStatus;
+}
+
+/** Every loop one session scheduled, with the session it belongs to. */
+export interface SessionLoops {
+  sessionId: string;
+  pid: number;
+  cwd: string;
+  /** Session name when Claude Code derived one, else the basename of cwd. */
+  label: string;
+  isAlive: boolean;
+  /** Active loops first, then newest. */
+  loops: LoopInfo[];
+}
+
+/** Result of one manual loop scan. Null in ClaudePulseData until the user asks for one. */
+export interface LoopScan {
+  /** Only sessions that scheduled at least one loop. Live sessions first. */
+  sessions: SessionLoops[];
+  activeCount: number;
+  totalCount: number;
+  /** Epoch ms the scan completed. Loops are refreshed by hand, so the UI shows this. */
+  generatedAt: number;
+}
+
 export interface ClaudePulseData {
   stats: StatsCache | null;
   sessions: SessionFile[];
@@ -331,5 +407,7 @@ export interface ClaudePulseData {
   agents: AgentMap | null;
   /** Same gating as `agents`: only populated while the dashboard is open. */
   agentGraph: AgentGraph | null;
+  /** Null until the user scans for loops from the dashboard. Never refreshed by the poll. */
+  loops: LoopScan | null;
   usageStatus?: 'success' | 'cached' | 'rate_limited' | 'auth_error' | 'no_credentials' | 'error';
 }

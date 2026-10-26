@@ -48,6 +48,7 @@ const makeData = (sessions: SessionNode[]): ClaudePulseData => ({
   promptCache: null,
   agents: null,
   agentGraph: { sessions, generatedAt: Date.now(), truncated: false } satisfies AgentGraph,
+  loops: null,
 });
 
 type MessageHandler = (message: unknown) => void;
