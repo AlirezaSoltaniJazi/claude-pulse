@@ -7,21 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-10-26
-
-### Added
-
-- **Loops in the dashboard.** A new section after Usage lists every `/loop` your Claude sessions have
-  scheduled, grouped by the session that holds it (name, PID, working directory, live or exited). Each loop
-  shows its prompt, schedule — a cron interval in plain English, a one-shot time, or self-paced for `/loop`
-  with no interval — status, run count, last and next run, and when Claude Code's seven-day limit expires it.
-  Loops exist only in session memory, so they are read from the transcripts on demand: press **Show loops**
-  to scan and **Refresh loops** to rescan; the scan time is shown beside the list.
-- **Run now and Cancel on each active loop.** Run now sends the loop's prompt to its session immediately,
-  leaving the schedule unchanged; Cancel asks the session to cancel the job. A loop can only be reached from
-  inside its session, so both are typed into the VS Code terminal running that session after a confirmation,
-  or copied to the clipboard when the session runs in the Claude Code panel or outside VS Code.
-
 ### Performance
 
 - **The weekly token scan no longer re-reads every transcript.** Each transcript is cached on its size and
@@ -40,6 +25,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Task-complete notifications stopped for a session whose transcript was rewritten shorter.
 - A failed read in the task-complete detector leaked a file descriptor.
+
+## [1.2.0] - 2026-10-26
+
+### Added
+
+- **Loops in the dashboard.** A new section after Usage lists every `/loop` your Claude sessions have
+  scheduled, grouped by the session that holds it (name, PID, working directory, live or exited). Each loop
+  shows its prompt, schedule — a cron interval in plain English, a one-shot time, or self-paced for `/loop`
+  with no interval — status, run count, last and next run, and when Claude Code's seven-day limit expires it.
+  Loops exist only in session memory, so they are read from the transcripts on demand: press **Show loops**
+  to scan and **Refresh loops** to rescan; the scan time is shown beside the list.
+- **Run now and Cancel on each active loop.** Run now sends the loop's prompt to its session immediately,
+  leaving the schedule unchanged; Cancel asks the session to cancel the job. A loop can only be reached from
+  inside its session, so both are typed into the VS Code terminal running that session after a confirmation,
+  or copied to the clipboard when the session runs in the Claude Code panel or outside VS Code.
 
 ## [1.1.2] - 2026-10-25
 
